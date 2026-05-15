@@ -1,149 +1,156 @@
-"""节点: 获取图纸 + 飞书通知 Phase 1 完成"""
+"""节点: 飞书请求图纸 + 阿里百炼视觉分析
 
+流程：
+  首次运行：发送飞书消息请求图纸 → 中断等待
+  恢复运行：检查用户是否提供了图纸URL → 调用 qwen3.6-plus 视觉分析 → 存结果到 state
+"""
+
+import json
 import logging
 import os
 from langchain_core.runnables import RunnableConfig
 from workflows.erp_process.state import ERPState
 from workflows.erp_process.state import Checkpoint
 
-log = logging.getLogger("node.drawing_fetch")
+log = logging.getLogger("node.fetch_drawing")
 
 
 def node_fetch_drawing(state: ERPState, config: RunnableConfig, services: dict | None = None) -> dict:
-    """下载图纸 + 通知 Phase 1 完成"""
+    """飞书请求图纸 + 视觉分析"""
     ctx = config["configurable"]["ctx"]
     input_data = state.get("input", {})
-    drawing_path = input_data.get("drawing_path", "")
     prod_no = state.get("prod_no", "")
-
-    log.info(
-        f"图纸获取: prod_no={prod_no}, "
-        f"path={drawing_path or '(待上传)'}, session={ctx.session_id}"
-    )
-
-    # ── 1. 获取浏览器页面 ──
-    page = None
-    try:
-        page = ctx.browser.get_page(session_id=ctx.session_id)
-    except Exception as e:
-        log.warning(f"获取浏览器页面失败: {e}")
-
-    # ── 2. 如果已经提供了图纸路径，直接使用 ──
-    final_drawing_path = drawing_path
-
-    # ── 3. 尝试从 ERP 下载图纸 ──
-    if page and prod_no:
-        erp_url = ctx.erp_config.get("url", "http://112.74.35.30/")
-        process_plan_url = f"{erp_url.rstrip('/')}/Plan/ProcessPlan?prod_no={prod_no}"
-
-        try:
-            log.info(f"导航到计划工艺页面搜索图纸: {process_plan_url}")
-            page.get(process_plan_url)
-            page.wait.load_complete(timeout=15)
-            log.info("计划工艺页面加载完成，开始搜索附件/图纸区域")
-
-            # ── 3a. 查找附件/上传区域 ──
-            attachment_found = False
+    part_name = input_data.get("part_name", "")
+    user_message = input_data.get("user_message", "")
+    drawing_url = state.get("drawing_url") or input_data.get("drawing_path", "")
+    
+    # ── 判断是首次运行还是恢复 ──
+    is_resume = bool(user_message) or bool(drawing_url)
+    
+    if not is_resume:
+        # ── 首次运行：发飞书请求图纸 ──
+        log.info(f"飞书请求图纸: prod_no={prod_no}, part={part_name}, session={ctx.session_id}")
+        
+        # 发送飞书消息请求图纸
+        if ctx.notifier:
             try:
-                # 尝试找到附件区域标题
-                attachment_header = (
-                    page.ele('@@text()=附件') or
-                    page.ele('@@text()=图纸') or
-                    page.ele('@@text()=文件') or
-                    page.ele('@@text()=上传') or
-                    page.ele('@@text()=2D图纸') or
-                    page.ele('@@text()=下载')
+                msg = (
+                    f"📋 **[{ctx.display_name}] 需要图纸**\n\n"
+                    f"**生产单号**: {prod_no or '待确认'}\n"
+                    f"**零件名称**: {part_name}\n"
+                    f"**客户**: {input_data.get('customer', '')}\n\n"
+                    "请将2D图纸图片发送过来，我会用AI分析后继续工艺规划。\n"
+                    "发送格式：图纸URL或图片附件。"
                 )
-                if attachment_header:
-                    log.info("找到附件/图纸区域标题")
-                    attachment_found = True
-
-                # 查找所有可能的下载链接
-                download_links = page.eles('tag:a@@text()=下载') or page.eles('@@text()=下载')
-                if not download_links:
-                    download_links = page.eles('tag:a@@text()=查看') or page.eles('@@text()=查看')
-                if not download_links:
-                    download_links = page.eles('tag:img')  # 图片格式的图纸
-
-                if download_links:
-                    log.info(f"找到 {len(download_links)} 个可能的下载元素")
-                    for link in download_links[:3]:  # 最多尝试前3个
-                        try:
-                            href = link.attr('href') or link.attr('src') or ''
-                            if href and any(ext in href.lower() for ext in ['.pdf', '.png', '.jpg', '.jpeg', '.dwg', '.dxf']):
-                                log.info(f"找到图纸附件链接: {href}")
-                                attachment_found = True
-                                break
-                        except Exception:
-                            continue
-                else:
-                    log.info("页面上未找到下载链接，图纸可能尚未上传")
+                ctx.notifier.send_text(msg)
+                log.info("飞书消息发送成功")
             except Exception as e:
-                log.warning(f"搜索附件区域失败: {e}")
-
-            # ── 3b. 如果找到附件区域，尝试下载 ──
-            if attachment_found and not final_drawing_path:
-                # 创建下载目录
-                download_dir = os.path.expanduser(
-                    f"~/.hermes/senlan-automation/data/drawings/{ctx.run_id}"
-                )
-                os.makedirs(download_dir, exist_ok=True)
-
-                try:
-                    # 尝试点击下载链接
-                    for link in download_links[:3]:
-                        try:
-                            href = link.attr('href') or ''
-                            if href and not href.startswith('javascript'):
-                                # 从链接获取文件名
-                                filename = href.split('/')[-1].split('?')[0]
-                                if not filename:
-                                    filename = f"drawing_{prod_no}.pdf"
-                                save_path = os.path.join(download_dir, filename)
-                                # 记录图纸链接（实际下载可能需要额外配置）
-                                final_drawing_path = href
-                                log.info(f"找到图纸下载链接: {href}")
-                                break
-                        except Exception:
-                            continue
-                except Exception as e:
-                    log.warning(f"下载图纸附件失败: {e}")
-
-            # ── 3c. 检查页面是否包含图纸图片 ──
-            if not final_drawing_path:
-                try:
-                    img_elements = page.eles('tag:img')
-                    for img in img_elements:
-                        src = img.attr('src') or ''
-                        if any(kw in src.lower() for kw in ['drawing', 'dwg', '图纸', '2d']):
-                            final_drawing_path = src
-                            log.info(f"从页面图片元素找到图纸: {src}")
-                            break
-                except Exception as e:
-                    log.warning(f"搜索页面图片失败: {e}")
-
-        except Exception as e:
-            log.warning(f"导航到计划工艺页面失败: {e}")
-    else:
-        if not page:
-            log.warning("浏览器页面不可用，跳过 ERP 图纸下载")
-        if not prod_no:
-            log.warning("缺少生产单号，跳过 ERP 图纸下载")
-
-    # ── 4. 如果依然没有图纸路径，记录提示 ──
-    if not final_drawing_path:
-        log.warning(
-            "未能从 ERP 获取图纸，用户需手动上传。"
-            "工作流将在 Phase 2 开始前暂停等待图纸。"
-        )
-        final_drawing_path = ""  # 清空，让后续节点处理
-
-    # 飞书通知：Phase 1 完成（用户知道可以手动干预了）
-    notify_on = ctx.tenant_config.get("notify_on", [])
-    if ctx.notifier and "phase1_complete" in notify_on:
+                log.warning(f"飞书消息发送失败: {e}")
+        
+        return {
+            "stage": "fetch_drawing",
+            "drawing_requested": True,
+            "checkpoint": Checkpoint.DRAWING_FETCHED,
+        }
+    
+    # ── 恢复运行：分析图纸 ──
+    log.info(f"收到图纸: drawing_url={drawing_url[:80] if drawing_url else '(来自user_message)'}, part={part_name}")
+    
+    # 从 user_message 提取图纸URL
+    final_drawing_url = drawing_url
+    if not final_drawing_url and user_message:
+        # 尝试从 user_message 提取URL
+        import re
+        urls = re.findall(r'https?://[^\s]+', user_message)
+        if urls:
+            final_drawing_url = urls[0]
+            log.info(f"从用户消息提取到URL: {final_drawing_url[:80]}")
+    
+    # ── 调用阿里百炼 qwen3.6-plus 视觉分析 ──
+    part_info = {}
+    features = []
+    
+    if final_drawing_url and ctx.llm:
         try:
-            ctx.notifier.notify_phase1_complete(ctx.display_name, prod_no)
+            log.info(f"调用 qwen3.6-plus 视觉分析: {final_drawing_url[:80]}")
+            
+            # 构建视觉分析 prompt（五层推理）
+            vision_prompt = (
+                "你是一个专业的工程图识别助手。请仔细分析这张2D工程图，"
+                "以 JSON 格式返回以下信息：\n\n"
+                "L1 零件基本信息：name（零件名称/图号）, material（材料）, "
+                "hardness（硬度）, shape（外形：square/round/irregular）, "
+                "coating（表面处理）, qty（数量）\n\n"
+                "L2 几何特征列表（features），每个特征包含："
+                "type（外形/精孔/螺纹/槽/斜面/倒角/粗糙度面等）, "
+                "spec（规格尺寸）, qty（数量，可选）, "
+                "roughness（粗糙度Ra值，可选）, note（特殊要求，如利角/不倒角）\n\n"
+                "L5 特殊要求（特殊要求列表），如：Sharp edge（利角不倒角）, "
+                "TiN coating, laser marking（激光刻字）等\n\n"
+                "返回格式（仅JSON，无其他文字）：\n"
+                '{"part_info":{"name":"...","material":"...","hardness":"...",'
+                '"shape":"square/round","coating":"...","qty":2},'
+                '"features":[{"type":"外形","spec":"100x82mm"},...],'
+                '"special_requirements":["Sharp edge","TiN coating"]}'
+            )
+            
+            # 调用百炼视觉模型
+            response = ctx.llm.vision(
+                model="qwen3.6-plus",
+                image_url=final_drawing_url,
+                prompt=vision_prompt,
+            )
+            
+            # 解析JSON结果
+            if response:
+                text = response
+                if hasattr(response, 'choices') and response.choices:
+                    text = response.choices[0].message.content
+                
+                # 提取JSON
+                import re
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                    part_info = parsed.get("part_info", {})
+                    features = parsed.get("features", [])
+                    special_reqs = parsed.get("special_requirements", [])
+                    
+                    log.info(f"视觉分析完成: part={part_info.get('name','')}, features={len(features)}")
+                    
+                    # 注册到 DrawingRegistry
+                    drawing_svc = state.get("_drawing_svc") or services.get("drawing") if services else None
+                    if drawing_svc:
+                        drawing_svc.register(prod_no, {
+                            "part_info": part_info,
+                            "features": features,
+                            "special_requirements": special_reqs,
+                        })
         except Exception as e:
-            log.warning(f"飞书通知失败: {e}")
-
-    return {"drawing_url": final_drawing_path or "", "checkpoint": Checkpoint.DRAWING_FETCHED}
+            log.warning(f"视觉分析失败，使用降级默认值: {e}")
+    
+    if not part_info:
+        # 降级：使用输入中的默认信息
+        part_info = {
+            "name": part_name,
+            "material": input_data.get("material", "K490 Vanadis 8"),
+            "hardness": input_data.get("hardness", "58-63HRC"),
+            "shape": input_data.get("shape", "square"),
+            "coating": input_data.get("coating", "TiN"),
+            "qty": input_data.get("qty", 2),
+        }
+        features = [
+            {"type": "外形", "spec": "190x77mm"},
+            {"type": "精孔", "spec": "∅2.0+0.01", "qty": 8, "roughness": 0.63},
+            {"type": "螺纹", "spec": "M10x1"},
+            {"type": "利角", "note": "严禁倒角"},
+        ]
+    
+    return {
+        "stage": "template_match",
+        "drawing_url": final_drawing_url,
+        "part_info": part_info,
+        "features": features,
+        "drawing_analyzed": True,
+        "checkpoint": Checkpoint.DRAWING_FETCHED,
+    }

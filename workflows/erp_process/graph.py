@@ -1,12 +1,15 @@
 """
 ERP 工艺工作流 — LangGraph 定义
 
-三段式（通过 interrupt_after 实现自然中断，无需手动路由）：
+三段式（通过 interrupt_after 实现自然中断，无需手动路由）:
   Phase 1 (Online ERP):   login → create_order → fetch_drawing
-    ↓ interrupt_after (等人确认图纸/提供图纸)
+    ↓ interrupt_after (飞书请求图纸→人工发图→AI视觉分析)
   Phase 2 (Offline AI):   template_match → (vision_analyze?) → process_reasoning → generate_cnc
     ↓ interrupt_after (人工审核 CNC 代码)
   Phase 3 (Online ERP):   erp_reconnect → fill_process_plan → fill_routing_cnc → END
+
+注：fetch_drawing 节点已内置飞书请求图纸 + 阿里百炼 qwen3.6-plus 视觉分析，
+    图纸收到后自动解析并存储特征，无需单独跑 vision_analyze。
 
 多 Bot 架构：
   - 每个 agent 实例调用 build_erp_graph()，传入独立 checkpointer
@@ -75,6 +78,7 @@ def build_erp_graph(
         {"create_order": "create_order", END: END},
     )
     builder.add_edge("create_order", "fetch_drawing")
+    # fetch_drawing 已内置视觉分析，直接到 template_match
     builder.add_edge("fetch_drawing", "template_match")
     builder.add_conditional_edges(
         "template_match", route_template_match,

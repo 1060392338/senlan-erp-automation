@@ -37,12 +37,16 @@ class ServiceContainer:
     def kb(self):
         from services.kb_service import KBService
         if self._kb is None:
+            # 检查是否启用了知识库（默认跳过，因HuggingFace被墙）
             kb_cfg = self._config.get("services", {}).get("kb", {})
+            if kb_cfg.get("enabled", False) is not True:
+                log.info("知识库已禁用（config.services.kb.enabled != true），跳过初始化")
+                self._kb = None
+                return self._kb
+            kb_dir = kb_cfg.get("data_dir", "data/documents/")
+            idx_dir = kb_cfg.get("index_dir", "data/vector_index/")
             try:
-                self._kb = KBService(
-                    data_dir=kb_cfg.get("data_dir", "data/documents/"),
-                    index_dir=kb_cfg.get("index_dir", "data/vector_index/"),
-                )
+                self._kb = KBService(data_dir=kb_dir, index_dir=idx_dir)
             except Exception as e:
                 log.warning(f"知识库初始化失败: {e}")
                 self._kb = None

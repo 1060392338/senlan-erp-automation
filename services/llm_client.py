@@ -81,7 +81,7 @@ class LLMClient:
     def vision(
         self, image_url: str, prompt: str, model: str = "qwen-vl-max"
     ) -> str:
-        """视觉分析"""
+        """视觉分析（兼容旧接口）"""
         messages = [
             {
                 "role": "user",
@@ -90,5 +90,28 @@ class LLMClient:
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
             }
+        ]
+        return self.chat(messages, model=model)
+
+    def vision_with_system(
+        self,
+        image_url: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str = "qwen-vl-max",
+    ) -> str:
+        """带 system prompt 的视觉分析
+
+        解决旧 vision() 接口丢失 system prompt 的问题。
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
         ]
         return self.chat(messages, model=model)

@@ -32,7 +32,7 @@ def node_login(state: ERPState, config: RunnableConfig, services: Optional[dict]
         return {
             "session_id": ctx.session_id,
             "errors": ["ERP 登录失败 — 页面仍处于登录状态或未跳转"],
-"checkpoint": Checkpoint.LOGIN_DONE,
+            "checkpoint": Checkpoint.LOGIN_FAILED,
         }
 
     return {"session_id": ctx.session_id, "checkpoint": Checkpoint.LOGIN_DONE}

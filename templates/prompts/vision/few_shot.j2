@@ -1,0 +1,34 @@
+示例1 — 切刀零件:
+  图纸标题栏: Cutting Blade, K490 Vanadis 8, 58-63HRC, 2pcs, TiN
+  图纸标注: 外形≈100×102×82mm, 4×∮10.5通孔, 3×M8螺纹,
+            2×∮10.47精孔H7 Ra0.63, 3×3.05宽槽Ra0.63,
+            利角(Sharp edge)严禁倒角, 沉头30°斜面,
+            表面Ra0.63/Ra1.6分区, TIN涂层, 刻字FMK-7736.030.61
+  输出:
+  {"part_info":{"name":"Cutting Blade","material":"K490 Vanadis 8","hardness":"58-63HRC","shape":"square","coating":"TiN","qty":2},
+   "features":[
+     {"type":"外形","spec":"100×102×82mm"},
+     {"type":"通孔","spec":"∮10.5","qty":4},
+     {"type":"螺纹","spec":"M8","qty":3},
+     {"type":"精孔","spec":"∮10.47H7","qty":2,"roughness":0.63},
+     {"type":"槽","spec":"3.05mm宽","qty":3,"roughness":0.63},
+     {"type":"利角","note":"严禁倒角"},
+     {"type":"斜面","spec":"30°沉头"}
+   ],
+   "special_requirements":["Sharp edge","TiN coating","Laser marking: FMK-7736.030.61"]}
+
+示例2 — 轴类零件:
+  图纸标题栏: Guide Shaft, SKD11, 58-62HRC, 1pc
+  图纸标注: ∮50×200mm, ∮30H7×50深内孔 Ra0.4,
+            键槽12×5×30mm, M16×1.5螺纹,
+            两端中心孔B型, 表面氮化处理
+  输出:
+  {"part_info":{"name":"Guide Shaft","material":"SKD11","hardness":"58-62HRC","shape":"round","coating":"氮化","qty":1},
+   "features":[
+     {"type":"外形","spec":"∮50×200mm"},
+     {"type":"内孔","spec":"∮30H7","depth":"50mm","roughness":0.4},
+     {"type":"键槽","spec":"12×5×30mm"},
+     {"type":"螺纹","spec":"M16×1.5"},
+     {"type":"中心孔","spec":"B型","qty":2}
+   ],
+   "special_requirements":["表面氮化处理"]}

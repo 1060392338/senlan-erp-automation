@@ -1,0 +1,23 @@
+; SODICK AD32LS — 精孔镜面放电示例
+; Electrode: Cu-W alloy
+; Surface: Ra0.63 -> Ra0.2
+;
+C000 (CONDITION SET)
+G90
+M80 (POWER ON)
+;
+; --- Step 1: Rough EDM ---
+C001 (IP=5A, PW=50us, VP=90V)
+G01 Z-5.0 H001
+G01 X10.0 Y10.0
+;
+; --- Step 2: Semi-finish ---
+C002 (IP=2A, PW=20us, VP=70V)
+G01 Z-5.1 H001
+;
+; --- Step 3: Finish ---
+C003 (IP=0.5A, PW=5us, VP=50V)
+G01 Z-5.15 H001
+M88 (MIRROR FINISH ON)
+;
+M02

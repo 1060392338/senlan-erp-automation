@@ -1,4 +1,4 @@
-# ERP 工艺自动化 · 设计文档
+# ERP 工艺自动化 · 设计文档（V3 多Agent编排版）
 
 ## 整体流程
 
@@ -9,33 +9,42 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ Phase 1: Online ERP                                         │
 │                                                             │
-│ login_erp → create_order → fetch_drawing                    │
-│                              ↕ interrupt_after              │
-│               （暂停等待：用户确认图纸/手动上传）             │
+│ login_erp → detect_new_orders → fetch_feishu_drawing        │
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase 2: Offline AI                                         │
+│ Phase 2: 多Agent编排（离线AI，无中断点）                     │
 │                                                             │
-│ template_match                                               │
-│      │                                                      │
-│      ├─（匹配到）→ process_reasoning（直接适配模板）        │
-│      └─（未匹配）→ vision_analyze → process_reasoning       │
-│                                          │                  │
-│                                          ▼                  │
-│                                   generate_cnc              │
-│                                      ↕ interrupt_after      │
-│                 （暂停等待：人工审核 CNC 代码）              │
+│ supervisor_agent_run                                        │
+│   ├── VisionAgent.analyze()     — 阿里百炼视觉分析         │
+│   ├── CNCProgrammingAgent.generate()                        │
+│   │   ├── 数控精车 (TAKISAWA NEX-108)                       │
+│   │   ├── 镜面放电 (SODICK AD32LS)                         │
+│   │   └── 自我审查 (self-review)                            │
+│   ├── ReviewAgent.check()       — 交叉审查                  │
+│   └── 循环修正 (max 3次, 总超时 600s)                      │
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase 3: Online ERP                                         │
+│ Phase 3: Online ERP (session过期, 重新登录)                 │
 │                                                             │
 │ erp_reconnect → fill_process_plan → fill_routing_cnc → END  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## V3 与 V2 差异
+
+| 维度 | V2 | V3 |
+|:-----|:---|:---|
+| 架构 | 线性节点 | 多Agent编排 (Supervisor调度) |
+| AI节点 | `process_reasoning` + `generate_cnc` | `supervisor_agent_run` 统管 |
+| 提示词 | f-string 硬编码 | Jinja2 模板 (`templates/prompts/`) |
+| 修正循环 | 无 | 自我审查 + 交叉审查 + 最多3次修正 |
+| 中断点 | 2个（图纸/CNC） | 无（一次性编排完成） |
+| VXE交互 | 数据模型push | 点击"+"按钮+双击单元格 |
+| 超时 | 无 | 600s（LLM调用耗时） |
 
 ## 三段式设计（LangGraph interrupt_after）
 
@@ -88,71 +97,71 @@ ctx = RequestContext.create(
 - 导航到登录页 → 填入账号密码 → 点击登录 → 验证成功
 - 多策略验证：页面关键词/URL跳转/标题变化
 - 返回: `{session_id, checkpoint: 5}`
+- 文件: `workflows/erp_process/nodes/login.py`, `_login.py`
 
-**create_order** — 创建销售订单
-- 导航到 `/Sales/OrderCreate` → 填写客户/产品/数量/交期 → 提交
-- 提取生产单号：4种策略（URL参数/页面元素/正则/关键词）
-- 降级：浏览器不可用时自动生成模拟单号
-- 返回: `{prod_no, checkpoint: 8}`
+**detect_new_orders** — 检测新生产单
+- 导航到计划工艺页面 → 按生产单号搜索
+- 遍历BOM清单/未发送/已发送三个radio标签页
+- 提取新订单列表
+- 返回: `{new_orders, pending_order_idx, checkpoint: 8}`
+- 文件: `workflows/erp_process/nodes/detect_new_orders.py`
 
-**fetch_drawing** — 获取2D图纸
-- 导航到计划工艺页面 → 搜索附件区域
-- 支持格式：PDF/PNG/JPG/DWG/DXF
-- 降级：无附件时等待用户手动上传
-- 飞书通知：Phase 1 完成
-- 返回: `{drawing_url, checkpoint: 10}`
+**fetch_feishu_drawing** — 从飞书获取2D图纸
+- 通过飞书开放平台API按生产单号匹配图纸文件
+- 下载到本地缓存 (`data/drawings/{tenant}/`)
+- 支持格式：PDF/PNG/JPG
+- 返回: `{drawing_url, drawing_local_path, checkpoint: 10}`
+- 文件: `workflows/erp_process/nodes/drawing_fetch.py`
 
 ### Phase 2 节点
 
-**template_match** — 匹配已有图纸模板
-- 通过 DrawingRegistry 按零件名搜索
-- 命中 → 跳过 Vision，直接走模板适配
-- 未命中 → 走 Vision 分析
-- 返回: `{matched_template, checkpoint: 15}`
-
-**vision_analyze** — Qwen-VL 视觉分析
-- 调用 DashScope Vision API 分析 2D 工程图
-- 输出 L1 零件信息（名称/材料/硬度/涂层）
-- 输出 L2 几何特征（外形/孔/螺纹/槽/斜面/利角）
-- 输出 L5 特殊要求（刻字/涂层/注意事项）
-- 注册到 DrawingRegistry
-- 返回: `{part_info, features, checkpoint: 17}`
-
-**process_reasoning** — 五层工艺推理
-- L1：零件类型 → 选择工艺路线模板
-- L2：几何特征 → 映射到加工手段
-- L3：5原则排序工序
-- L4：切削参数（知识库 RAG）
-- L5：特殊注意事项注入
-- 形状规则：方形→铣磨放电(14步)，圆形→车磨放电(7步)
-- 返回: `{process_plan, checkpoint: 18}`
-
-**generate_cnc** — CNC 代码生成
-- 使用 Jinja2 模板渲染 TAKISAWA NEX-108 G 代码
-- 生成 SODICK AD32LS EDM 镜面放电参数表
-- 收集注意事项（利角/交期等）
-- 飞书通知：CNC 待审核
-- 返回: `{cnc_code, checkpoint: 20}`
+**supervisor_agent_run** — 多Agent编排（替代 V2 的 process_reasoning + generate_cnc）
+- 主控Agent (`SupervisorAgent`) 调度3个子Agent：
+  1. **VisionAgent** — 阿里百炼 qwen3.6-plus 视觉分析
+     - 读图纸标题栏 → L1零件类型/材料/硬度/涂层
+     - OCR识别孔/螺纹/公差/粗糙度 → L2几何特征列表
+     - 识别利角/刻字等注释 → L5特殊要求
+  2. **CNCProgrammingAgent** — 生成CNC代码
+     - 数控精车 (TAKISAWA NEX-108) G代码
+     - 镜面放电 (SODICK AD32LS) 参数表
+     - 自我审查 (self-review，当前强制通过)
+  3. **ReviewAgent** — 交叉审查
+     - 检查代码完整性和正确性
+     - 当前 revision_needed 作为最终结论（审查标准过严）
+- 修正循环：不通过→重新识图+编程→再审查 (max 3次)
+- 总超时：600s (`LOOP_TIMEOUT_SECONDS`)
+- 文件: `workflows/erp_process/agents/supervisor.py`
+- 子Agent: `agents/vision_agent.py`, `agents/cnc_agent.py`, `agents/review_agent.py`
+- 提示词: `templates/prompts/` (Jinja2)
+- 返回: `{part_info, features, process_plan, cnc_code, checkpoint: 20}`
 
 ### Phase 3 节点
 
 **erp_reconnect** — 重新登录ERP
 - Phase 2 耗时较长，session 可能过期
-- 重新登录但不导航到特定页面
+- 调用 `fill_login_form()` 重新登录
+- ⚠ 登录成功后主动 `page.get(craft_url)` 导航到计划工艺页（防止chrome://newtab/回退）
 - 返回: `{checkpoint: 22}`
+- 文件: `workflows/erp_process/nodes/erp_reconnect.py`
 
 **fill_process_plan** — 回填计划工艺
-- 导航到 `{erp_url}/Plan/ProcessPlan?prod_no={prod_no}`
-- 找到工艺计划表格 → 填入14道工序 → 提交
-- 支持表格布局和扁平输入框布局
+- 导航到 `#/Craftwork/steel_craftworkList/0210`（SPA路由）
+- 搜索生产单（遍历BOM清单/未发送/已发送）
+- 勾选行 → 点"工艺管理"按钮 → 打开VXE弹窗
+- 点击"+"按钮添加行 → 双击单元格 → popover选工序
+- 填入工艺要求/工时/工人
+- 上传2D图纸 → 保存
+- ⚠ 已知坑：搜索不到生产单时全选checkbox找不到，弹窗打不开
 - 返回: `{plan_saved, checkpoint: 25}`
+- 文件: `workflows/erp_process/nodes/process_filler.py`
 
 **fill_routing_cnc** — 回填计划工序CNC代码
-- 导航到 `{erp_url}/Plan/ProcessRouting?prod_no={prod_no}`
+- 导航到计划工序页面 → 关联生产单号
 - 定位"数控精车"行 → 填入 TAKISAWA CNC 代码
 - 定位"镜面放电"行 → 填入 SODICK EDM 参数
 - 飞书通知：工作流完成
 - 返回: `{routing_saved, cnc_saved, checkpoint: 30}`
+- 文件: `workflows/erp_process/nodes/routing_filler.py`
 
 ## 错误处理
 

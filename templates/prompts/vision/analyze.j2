@@ -1,0 +1,27 @@
+请分析这张2D工程图，以 JSON 格式返回以下分层信息：
+
+### L1 零件基本信息
+- name: 零件名称或图号
+- material: 材料牌号（如 K490 Vanadis 8）
+- hardness: 硬度（如 58-63HRC）
+- shape: 外形类别（square/round/irregular）
+- coating: 表面处理（如 TiN coating）
+- qty: 数量
+
+### L2 几何特征列表（features）
+每个特征包含：
+- type: 类型（外形/精孔/螺纹/槽/斜面/倒角/粗糙度面/EDM面）
+- spec: 规格尺寸（如 100×82mm / ∮10.5 / M8×1.25）
+- qty: 数量（可选）
+- roughness: 粗糙度Ra值（可选，如 0.63）
+- tolerance: 公差等级或数值（可选，如 H7 / ±0.01）
+- note: 特殊说明（可选，如"利角不许倒角"）
+
+### L5 特殊要求
+- special_requirements: 数组，如 ["Sharp edge", "TiN coating", "Laser marking: FMK-7736.030.61"]
+
+### 少样本参考
+{{ few_shot }}
+
+### 返回格式（仅JSON，无其他文字）
+{"part_info":{...}, "features":[...], "special_requirements":[...]}

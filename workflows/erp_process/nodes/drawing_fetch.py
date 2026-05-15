@@ -1,156 +1,237 @@
-"""节点: 飞书请求图纸 + 阿里百炼视觉分析
+"""节点: 飞书共享文件夹匹配图纸
 
 流程：
-  首次运行：发送飞书消息请求图纸 → 中断等待
-  恢复运行：检查用户是否提供了图纸URL → 调用 qwen3.6-plus 视觉分析 → 存结果到 state
+  1. 从 state 获取 new_orders 列表，取当前待处理的订单
+  2. 访问飞书共享文档文件夹 (folder_token=CoP8f0nYBlSmMudveyjcSyrKneg)
+  3. 按生产单号 (prod_no) 查找匹配的图纸文件
+  4. 匹配成功 → 下载到本地 → 中断等待确认
+  5. 匹配失败 → 飞书消息通知用户 → 中断等待
 """
 
 import json
 import logging
 import os
+import re
+from typing import Optional
+import requests
+import tempfile
 from langchain_core.runnables import RunnableConfig
-from workflows.erp_process.state import ERPState
-from workflows.erp_process.state import Checkpoint
+from workflows.erp_process.state import ERPState, Checkpoint
 
-log = logging.getLogger("node.fetch_drawing")
+log = logging.getLogger("node.drawing_fetch")
+
+# 飞书云空间 API 配置
+FEISHU_DRIVE_BASE = "https://open.feishu.cn/open-apis/drive/v1"
+FOLDER_TOKEN = "CoP8f0nYBlSmMudveyjcSyrKneg"  # 森蓝ERP图纸共享文件夹
 
 
-def node_fetch_drawing(state: ERPState, config: RunnableConfig, services: dict | None = None) -> dict:
-    """飞书请求图纸 + 视觉分析"""
+def _get_feishu_token(ctx) -> Optional[str]:
+    """从上下文中获取飞书 tenant_access_token"""
+    # 优先从 tenant_config 获取
+    feishu_config = ctx.tenant_config.get("feishu", {})
+    token = feishu_config.get("tenant_access_token") or feishu_config.get("access_token")
+    if token:
+        return token
+
+    # 从全局配置获取 app_id / app_secret 并申请 token
+    app_id = ctx.global_config.get("feishu", {}).get("app_id", "")
+    app_secret = ctx.global_config.get("feishu", {}).get("app_secret", "")
+    if app_id and app_secret:
+        try:
+            resp = requests.post(
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret},
+                timeout=10,
+            )
+            data = resp.json()
+            return data.get("tenant_access_token")
+        except Exception as e:
+            log.warning(f"获取飞书 token 失败: {e}")
+
+    log.warning("无法获取飞书 token，请检查 feishu 配置")
+    return None
+
+
+def _list_folder_files(token: str) -> list[dict]:
+    """列出飞书共享文件夹中的所有文件"""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    all_files = []
+    page_token = None
+    while True:
+        params = {
+            "page_size": 50,
+            "folder_token": FOLDER_TOKEN,
+            "types": "file",
+        }
+        if page_token:
+            params["page_token"] = page_token
+
+        try:
+            resp = requests.get(
+                f"{FEISHU_DRIVE_BASE}/files",
+                headers=headers,
+                params=params,
+                timeout=15,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                log.warning(f"飞书列表文件失败: {data.get('msg', '')}")
+                break
+
+            result = data.get("data", {})
+            files = result.get("files", [])
+            all_files.extend(files)
+            log.info(f"拉取到 {len(files)} 个文件")
+
+            if not result.get("has_more"):
+                break
+            page_token = result.get("page_token")
+
+        except Exception as e:
+            log.warning(f"飞书 API 请求失败: {e}")
+            break
+
+    return all_files
+
+
+def _match_drawing(files: list, prod_no: str) -> Optional[dict]:
+    """按生产单号匹配图纸文件（文件名包含 prod_no）"""
+    for f in files:
+        name = f.get("name", "")
+        # 文件名匹配：精确匹配或包含生产单号
+        if prod_no in name:
+            log.info(f"图纸匹配成功: {name} (prod_no={prod_no})")
+            return f
+
+    log.info(f"未找到匹配 {prod_no} 的图纸文件")
+    return None
+
+
+def _download_file(token: str, file_token: str) -> Optional[bytes]:
+    """下载飞书文件"""
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        resp = requests.get(
+            f"{FEISHU_DRIVE_BASE}/medias/{file_token}/download",
+            headers=headers,
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.content
+        log.warning(f"下载文件失败: HTTP {resp.status_code}")
+    except Exception as e:
+        log.warning(f"下载文件异常: {e}")
+    return None
+
+
+def node_fetch_drawing(state: ERPState, config: RunnableConfig, services: Optional[dict] = None) -> dict:
+    """飞书文件夹匹配图纸"""
     ctx = config["configurable"]["ctx"]
     input_data = state.get("input", {})
-    prod_no = state.get("prod_no", "")
-    part_name = input_data.get("part_name", "")
-    user_message = input_data.get("user_message", "")
-    drawing_url = state.get("drawing_url") or input_data.get("drawing_path", "")
-    
-    # ── 判断是首次运行还是恢复 ──
-    is_resume = bool(user_message) or bool(drawing_url)
-    
-    if not is_resume:
-        # ── 首次运行：发飞书请求图纸 ──
-        log.info(f"飞书请求图纸: prod_no={prod_no}, part={part_name}, session={ctx.session_id}")
-        
-        # 发送飞书消息请求图纸
+    new_orders = state.get("new_orders", [])
+    pending_idx = state.get("pending_order_idx", 0)
+
+    # ── 0. 确定当前要处理的订单（优先使用 input.prod_no） ──
+    prod_no = input_data.get("prod_no", "")
+    if not prod_no and pending_idx < len(new_orders):
+        prod_no = new_orders[pending_idx].get("prod_no", "")
+    if not prod_no:
+        log.info("无生产单号，跳过图纸匹配")
+        return {"checkpoint": Checkpoint.DRAWING_FETCHED}
+
+    # ── 0.5. 检查是否已有本地图纸路径（跳过飞书） ──
+    if input_data.get("drawing_path"):
+        drawing_path = input_data["drawing_path"]
+        if os.path.exists(drawing_path):
+            log.info(f"使用输入中指定的本地图纸路径: {drawing_path}")
+            return {
+                "prod_no": prod_no,
+                "drawing_url": None,
+                "drawing_local_path": drawing_path,
+                "drawing_matched": True,
+                "checkpoint": Checkpoint.DRAWING_FETCHED,
+            }
+
+    # ── 1. 确定当前要处理的订单 ──
+    if pending_idx >= len(new_orders):
+        log.info("所有订单已处理完毕")
+        return {"checkpoint": Checkpoint.DRAWING_FETCHED}
+
+    current_order = new_orders[pending_idx]
+    prod_no = current_order.get("prod_no", "")
+    log.info(f"处理订单 [{pending_idx + 1}/{len(new_orders)}]: prod_no={prod_no}")
+
+    # ── 2. 获取飞书 token ──
+    feishu_token = _get_feishu_token(ctx)
+    if not feishu_token:
+        log.warning("无法连接飞书，跳过图纸匹配")
+        return {
+            "prod_no": prod_no,
+            "drawing_url": None,
+            "drawing_local_path": None,
+            "drawing_matched": False,
+            "checkpoint": Checkpoint.DRAWING_FETCHED,
+            "errors": ["飞书 token 获取失败"],
+        }
+
+    # ── 3. 列出文件夹文件，按生产单号匹配 ──
+    files = _list_folder_files(feishu_token)
+    matched_file = _match_drawing(files, prod_no)
+
+    if not matched_file:
+        # 匹配失败 → 通知用户
+        log.info(f"未找到 {prod_no} 的图纸，发送飞书通知")
         if ctx.notifier:
             try:
                 msg = (
-                    f"📋 **[{ctx.display_name}] 需要图纸**\n\n"
-                    f"**生产单号**: {prod_no or '待确认'}\n"
-                    f"**零件名称**: {part_name}\n"
-                    f"**客户**: {input_data.get('customer', '')}\n\n"
-                    "请将2D图纸图片发送过来，我会用AI分析后继续工艺规划。\n"
-                    "发送格式：图纸URL或图片附件。"
+                    f"⚠️ **图纸匹配失败**\\n\\n"
+                    f"**生产单号**: {prod_no}\\n"
+                    f"**当前进度**: {pending_idx + 1}/{len(new_orders)}\\n\\n"
+                    f"在飞书共享文件夹中未找到匹配的图纸文件。\\n"
+                    f"请将图纸上传到飞书文件夹，文件名需包含生产单号 {prod_no}。\\n"
+                    f"上传后回复「继续」重试。"
                 )
                 ctx.notifier.send_text(msg)
-                log.info("飞书消息发送成功")
             except Exception as e:
-                log.warning(f"飞书消息发送失败: {e}")
-        
+                log.warning(f"飞书通知失败: {e}")
+
         return {
-            "stage": "fetch_drawing",
-            "drawing_requested": True,
+            "prod_no": prod_no,
+            "drawing_url": None,
+            "drawing_local_path": None,
+            "drawing_matched": False,
             "checkpoint": Checkpoint.DRAWING_FETCHED,
         }
-    
-    # ── 恢复运行：分析图纸 ──
-    log.info(f"收到图纸: drawing_url={drawing_url[:80] if drawing_url else '(来自user_message)'}, part={part_name}")
-    
-    # 从 user_message 提取图纸URL
-    final_drawing_url = drawing_url
-    if not final_drawing_url and user_message:
-        # 尝试从 user_message 提取URL
-        import re
-        urls = re.findall(r'https?://[^\s]+', user_message)
-        if urls:
-            final_drawing_url = urls[0]
-            log.info(f"从用户消息提取到URL: {final_drawing_url[:80]}")
-    
-    # ── 调用阿里百炼 qwen3.6-plus 视觉分析 ──
-    part_info = {}
-    features = []
-    
-    if final_drawing_url and ctx.llm:
-        try:
-            log.info(f"调用 qwen3.6-plus 视觉分析: {final_drawing_url[:80]}")
-            
-            # 构建视觉分析 prompt（五层推理）
-            vision_prompt = (
-                "你是一个专业的工程图识别助手。请仔细分析这张2D工程图，"
-                "以 JSON 格式返回以下信息：\n\n"
-                "L1 零件基本信息：name（零件名称/图号）, material（材料）, "
-                "hardness（硬度）, shape（外形：square/round/irregular）, "
-                "coating（表面处理）, qty（数量）\n\n"
-                "L2 几何特征列表（features），每个特征包含："
-                "type（外形/精孔/螺纹/槽/斜面/倒角/粗糙度面等）, "
-                "spec（规格尺寸）, qty（数量，可选）, "
-                "roughness（粗糙度Ra值，可选）, note（特殊要求，如利角/不倒角）\n\n"
-                "L5 特殊要求（特殊要求列表），如：Sharp edge（利角不倒角）, "
-                "TiN coating, laser marking（激光刻字）等\n\n"
-                "返回格式（仅JSON，无其他文字）：\n"
-                '{"part_info":{"name":"...","material":"...","hardness":"...",'
-                '"shape":"square/round","coating":"...","qty":2},'
-                '"features":[{"type":"外形","spec":"100x82mm"},...],'
-                '"special_requirements":["Sharp edge","TiN coating"]}'
-            )
-            
-            # 调用百炼视觉模型
-            response = ctx.llm.vision(
-                model="qwen3.6-plus",
-                image_url=final_drawing_url,
-                prompt=vision_prompt,
-            )
-            
-            # 解析JSON结果
-            if response:
-                text = response
-                if hasattr(response, 'choices') and response.choices:
-                    text = response.choices[0].message.content
-                
-                # 提取JSON
-                import re
-                json_match = re.search(r'\{.*\}', text, re.DOTALL)
-                if json_match:
-                    parsed = json.loads(json_match.group())
-                    part_info = parsed.get("part_info", {})
-                    features = parsed.get("features", [])
-                    special_reqs = parsed.get("special_requirements", [])
-                    
-                    log.info(f"视觉分析完成: part={part_info.get('name','')}, features={len(features)}")
-                    
-                    # 注册到 DrawingRegistry
-                    drawing_svc = state.get("_drawing_svc") or services.get("drawing") if services else None
-                    if drawing_svc:
-                        drawing_svc.register(prod_no, {
-                            "part_info": part_info,
-                            "features": features,
-                            "special_requirements": special_reqs,
-                        })
-        except Exception as e:
-            log.warning(f"视觉分析失败，使用降级默认值: {e}")
-    
-    if not part_info:
-        # 降级：使用输入中的默认信息
-        part_info = {
-            "name": part_name,
-            "material": input_data.get("material", "K490 Vanadis 8"),
-            "hardness": input_data.get("hardness", "58-63HRC"),
-            "shape": input_data.get("shape", "square"),
-            "coating": input_data.get("coating", "TiN"),
-            "qty": input_data.get("qty", 2),
-        }
-        features = [
-            {"type": "外形", "spec": "190x77mm"},
-            {"type": "精孔", "spec": "∅2.0+0.01", "qty": 8, "roughness": 0.63},
-            {"type": "螺纹", "spec": "M10x1"},
-            {"type": "利角", "note": "严禁倒角"},
-        ]
-    
+
+    # ── 4. 下载图纸到本地 ──
+    file_token = matched_file.get("file_token", matched_file.get("token", ""))
+    file_name = matched_file.get("name", f"{prod_no}.jpg")
+    file_data = _download_file(feishu_token, file_token)
+
+    if file_data:
+        # 保存到临时目录
+        temp_dir = tempfile.mkdtemp(prefix="senlan_drawing_")
+        ext = os.path.splitext(file_name)[1] or ".jpg"
+        local_path = os.path.join(temp_dir, f"{prod_no}{ext}")
+        with open(local_path, "wb") as f:
+            f.write(file_data)
+        log.info(f"图纸已下载: {local_path} ({len(file_data)} bytes)")
+    else:
+        local_path = None
+        log.warning("图纸下载失败")
+
+    # ── 5. 记录图纸URL（飞书文件链接） ──
+    feishu_file_url = f"https://my.feishu.cn/drive/file/{file_token}" if file_token else None
+
+    log.info(f"图纸匹配成功: prod_no={prod_no}, file={file_name}")
     return {
-        "stage": "template_match",
-        "drawing_url": final_drawing_url,
-        "part_info": part_info,
-        "features": features,
-        "drawing_analyzed": True,
+        "prod_no": prod_no,
+        "drawing_url": feishu_file_url,
+        "drawing_local_path": local_path,
+        "drawing_matched": True,
         "checkpoint": Checkpoint.DRAWING_FETCHED,
     }

@@ -1,0 +1,42 @@
+### 最终合成
+
+请将以下子Agent的工作成果合成为完整的工艺包：
+
+#### 识图结果
+```json
+{{ vision_result }}
+```
+
+#### CNC 代码
+{% for seg in cnc_result.code_segments %}
+**设备**: {{ seg.machine }}
+**特征**: {{ seg.feature }}
+```python
+{{ seg.code }}
+```
+{% endfor %}
+
+#### 审核结论
+```json
+{{ review_result }}
+```
+
+### 输出格式（仅JSON）
+{
+  "prod_no": "{{ prod_no }}",
+  "part_info": {...},
+  "features": [...],
+  "process_plan": [...],
+  "cnc_code": {
+    "takisawa_nex108": "...",
+    "sodick_ad32ls": {...},
+    "segments": [...],
+    "feature_code_map": {...}
+  },
+  "quality_report": {
+    "vision_confidence": 0.95,
+    "cnc_self_review": "pass",
+    "cross_review_verdict": "approve",
+    "overall_score": 92
+  }
+}

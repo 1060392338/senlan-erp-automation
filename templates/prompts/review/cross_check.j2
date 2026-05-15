@@ -1,0 +1,45 @@
+请交叉审查以下两个子Agent的输出（宽松审查，不是生产级审核）：
+
+### 识图Agent输出
+```json
+{{ vision_output }}
+```
+
+### 编程Agent输出（CNC代码）
+```
+{% for seg in cnc_output.code_segments %}
+[{{ seg.machine }}] {{ seg.feature }}:
+{{ seg.code }}
+{% endfor %}
+```
+
+### 编程Agent自我审查结果
+```json
+{{ self_review }}
+```
+
+### 审查要求（宽松）
+1. 特征是否大致匹配？
+2. CNC代码是否基本合理（语法OK、有安全高度、有结尾即可）
+3. 自我审查结果参考即可，自己判断
+
+**原则：小问题算通过，只有严重错误才 revision_needed**
+
+### 输出格式（仅JSON）
+{
+  "vision_review": {
+    "passed": true,
+    "issues": [],
+    "feature_coverage": 0.85,
+    "corrections": {}
+  },
+  "cnc_review": {
+    "passed": true,
+    "issues": [],
+    "safety_score": 80,
+    "overall_score": 75,
+    "corrections": {}
+  },
+  "final_verdict": "approve",
+  "feedback_for_main_agent": "整体合理，有小改进空间但不影响使用"
+}

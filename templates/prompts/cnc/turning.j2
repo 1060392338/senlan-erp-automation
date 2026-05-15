@@ -1,0 +1,22 @@
+请为下列模具零件生成 **数控精车（TAKISAWA NEX-108）** 的 CNC G 代码。
+
+### 零件信息
+- 名称: {{ part_info.name }}
+- 材料: {{ part_info.material }} {{ part_info.hardness }}
+- 外形: {{ part_info.shape }}
+
+### 需要加工的特征
+{% for f in features %}
+- {{ f.type }}: {{ f.spec }}{% if f.roughness %} (Ra{{ f.roughness }}){% endif %}{% if f.tolerance %} (公差: {{ f.tolerance }}){% endif %}{% if f.qty %} ×{{ f.qty }}{% endif %}{% if f.note %} — {{ f.note }}{% endif %}
+{% endfor %}
+
+### 工艺信息
+- 工序: {{ process_name }}
+- 刀具: {{ tool }}
+- 工件硬度: {{ part_info.hardness }}
+
+### 少样本参考
+{{ few_shot }}
+
+### 输出格式
+仅输出 G 代码，不要任何额外文字说明。用 ( ... ) 做注释。

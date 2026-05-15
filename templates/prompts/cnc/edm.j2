@@ -1,0 +1,21 @@
+请为下列模具零件生成 **镜面放电（SODICK AD32LS）** 的 EDM 加工参数和 G 代码。
+
+### 零件信息
+- 名称: {{ part_info.name }}
+- 材料: {{ part_info.material }} {{ part_info.hardness }}
+
+### 需要放电加工的特征
+{% for f in features %}
+- {{ f.type }}: {{ f.spec }}{% if f.roughness %} (Ra{{ f.roughness }}){% endif %}{% if f.qty %} ×{{ f.qty }}{% endif %}
+{% endfor %}
+
+### 加工要求
+- 表面粗糙度: Ra{{ surface_roughness or 0.63 }}
+- 电极材料: 铜钨合金
+- 加工余量: 0.15mm（研磨余量）
+
+### 少样本参考
+{{ few_shot }}
+
+### 输出格式
+先输出放电参数表（markdown），再输出 G 代码，用 ###G_CODE 分割。

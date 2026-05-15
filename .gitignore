@@ -8,6 +8,7 @@ venv/
 
 # 项目数据
 data/chrome_data/
+data/chrome_*/
 data/vector_index/
 data/states/
 output/

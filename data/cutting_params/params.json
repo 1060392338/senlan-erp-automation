@@ -1,0 +1,143 @@
+{
+  "materials": {
+    "K490": {
+      "family": "powder_metallurgy_high_speed_steel",
+      "hardness_range": "58-63 HRC",
+      "density": "7.8 g/cm³",
+      "cutting": {
+        "turning": {
+          "tool_material": "PCBN / ceramic",
+          "speed_range_mmin": [
+            80,
+            120
+          ],
+          "feed_range_mmrev": [
+            0.05,
+            0.15
+          ],
+          "depth_of_cut_mm": [
+            0.1,
+            0.5
+          ],
+          "coolant": "emulsion_high_pressure"
+        },
+        "milling": {
+          "speed_range_mmin": [
+            60,
+            100
+          ],
+          "feed_per_tooth_mm": [
+            0.02,
+            0.08
+          ],
+          "depth_of_cut_mm": [
+            0.2,
+            1.0
+          ],
+          "tool_material": "carbide_TiAlN_coated"
+        },
+        "grinding": {
+          "wheel_type": "CBN_wheel",
+          "grit": [
+            "D64",
+            "D46",
+            "D15"
+          ],
+          "speed_ms": [
+            25,
+            35
+          ],
+          "depth_mm": [
+            0.002,
+            0.01
+          ]
+        },
+        "wire_edm": {
+          "wire_type": "brass_0.25mm",
+          "cut_1": {
+            "current_A": 5,
+            "pulse_us": 50,
+            "voltage_V": 90
+          },
+          "cut_2": {
+            "current_A": 2,
+            "pulse_us": 20,
+            "voltage_V": 70
+          },
+          "cut_3": {
+            "current_A": 0.5,
+            "pulse_us": 5,
+            "voltage_V": 50
+          },
+          "surface_roughness_um": 0.63
+        },
+        "edm_sinking": {
+          "electrode": [
+            "copper_tungsten",
+            "graphite"
+          ],
+          "rough_current_A": 5,
+          "finish_current_A": 0.2,
+          "mirror_pulse_us": 2,
+          "mirror_voltage_V": 30,
+          "wear_limit_pct": 0.5,
+          "surface_roughness_um": 0.63
+        }
+      },
+      "heat_treatment": {
+        "hardening_temp_C": 1100,
+        "tempering_temp_C": 520,
+        "hardness_HRC": "60-63"
+      },
+      "notes": "Vanadis 8 粉末冶金钢，高耐磨性，加工难度高，必须使用硬质合金/PCD刀具"
+    },
+    "SKD11": {
+      "family": "cold_work_tool_steel",
+      "hardness_range": "58-62 HRC",
+      "cutting": {
+        "turning": {
+          "tool_material": "carbide_TiAlN",
+          "speed_range_mmin": [
+            100,
+            160
+          ],
+          "feed_range_mmrev": [
+            0.08,
+            0.2
+          ],
+          "depth_of_cut_mm": [
+            0.2,
+            0.6
+          ]
+        }
+      }
+    },
+    "NAK80": {
+      "family": "prehardened_plastic_mold_steel",
+      "hardness_range": "37-42 HRC",
+      "cutting": {
+        "turning": {
+          "tool_material": "carbide",
+          "speed_range_mmin": [
+            150,
+            250
+          ],
+          "feed_range_mmrev": [
+            0.1,
+            0.25
+          ],
+          "depth_of_cut_mm": [
+            0.3,
+            1.0
+          ]
+        }
+      }
+    }
+  },
+  "defaults": {
+    "rough_allowance_mm": 0.5,
+    "heat_treat_shrinkage_mm": 0.003,
+    "wire_entry_allowance_mm": 3.0,
+    "finish_polish_allowance_mm": 0.05
+  }
+}

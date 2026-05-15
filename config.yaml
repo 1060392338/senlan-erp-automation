@@ -1,0 +1,51 @@
+# 森蓝精密 · ERP 工艺自动化 全局配置
+
+# ── 多租户配置 ──
+# 每个租户 = 一个独立的 ERP 账号 + 图纸存放目录 + 飞书通知目标
+# 添加新账号 = 在 .env 中加账号密码 + 在 tenants 下加一条
+tenants:
+  - id: senlan_472
+    enabled: true
+    display_name: "森蓝精密"
+    erp:
+      url: "http://112.74.35.30/"
+      username: "${ERP_472_USERNAME}"
+      password: "${ERP_472_PASSWORD}"
+    drawing_dir: data/drawings/472/
+    feishu:
+      webhook_url: "${FEISHU_WEBHOOK_URL}"
+      notify_on:
+        - workflow_start
+        - phase1_complete
+        - cnc_ready
+        - workflow_complete
+        - workflow_error
+
+# ── Agent 默认配置 ──
+agent:
+  default: erp_process_agent
+
+# ── 共享服务 ──
+services:
+  llm:
+    api_key: "${DASHSCOPE_API_KEY}"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_model: "qwen-max"
+    vision_model: "qwen-vl-max"
+  state:
+    state_dir: "data/states/"
+    checkpoints_db: "checkpoints.db"
+
+  kb:
+    data_dir: data/documents/
+    index_dir: data/vector_index/
+    embedding_model: "BAAI/bge-base-zh-v1.5"
+
+  browser:
+    chrome_data: data/chrome_data
+    port: 9223
+
+  feishu:
+    app_id: "${FEISHU_APP_ID}"
+    app_secret: "${FEISHU_APP_SECRET}"
+    default_open_id: "${FEISHU_OPEN_ID}"

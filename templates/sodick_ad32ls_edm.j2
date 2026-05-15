@@ -1,0 +1,19 @@
+# SODICK AD32LS — 镜面放电参数
+
+Machine: SODICK AD32LS
+Electrode: 铜钨合金
+Workpiece: {{ material }} {{ hardness }}HRC
+Surface: Ra{{ surface_roughness }}
+
+## 放电参数
+
+| Step | Current(A) | Pulse(μs) | Voltage(V) | Note |
+|------|-----------|-----------|------------|------|
+{% for step in steps %}
+| {{ step.name }} | {{ step.current_A }} | {{ step.pulse_us }} | {{ step.voltage_V }} | |
+{% endfor %}
+
+## 注意事项
+- 逐级过渡，不可跳级
+- 电极损耗控制在 ≤0.5%
+- 工作液：煤油或去离子水

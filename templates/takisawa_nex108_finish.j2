@@ -1,0 +1,24 @@
+; TAKISAWA NEX-108 — CNC 精车
+; Part: {{ part_name }}
+; Material: {{ material }} {{ hardness }}HRC
+; Date: {{ date }}
+;
+G90 G21 G40 G80
+G28 U0 W0
+;
+; --- Tool: {{ tool }} ---
+T{{ tool_no }}0{{ tool_no }}
+G96 S{{ speed }} M03             ; 线速度 {{ speed }} m/min
+G00 X{{ x_start }} Z{{ z_start }} M08
+;
+{% for pass in passes %}
+; Pass {{ loop.index }}: {{ pass.description }}
+G01 X{{ pass.x }} Z{{ pass.z }} F{{ pass.feed }}
+  {% if pass.dwell %}
+G04 X{{ pass.dwell }}              ; 暂停 {{ pass.dwell }}s
+  {% endif %}
+{% endfor %}
+;
+G00 X200 Z200 M09
+G28 U0 W0
+M30

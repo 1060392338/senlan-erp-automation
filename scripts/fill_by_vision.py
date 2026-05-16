@@ -499,7 +499,14 @@ def run(drawings_dir: str = None, drawing_path: str = None,
     from playwright.sync_api import sync_playwright as _sync_pw
 
     erp_username = account
-    erp_password = os.environ.get(f"ERP_{account}_PASSWORD", "123456")
+    erp_password = os.environ.get(f"ERP_{account}_PASSWORD", "")
+
+    # 密码校验
+    if not erp_password:
+        log.error(f"账号 {account} 密码未配置！请在 .env 中设置 ERP_{account}_PASSWORD")
+        print(f"\n❌ 错误：账号 {account} 密码未在 .env 中配置")
+        print(f"   请在 .env 中添加: ERP_{account}_PASSWORD=你的密码\n")
+        return False
     api_key = os.environ.get("DASHSCOPE_API_KEY", "")
 
     log.info(f"{'='*60}")

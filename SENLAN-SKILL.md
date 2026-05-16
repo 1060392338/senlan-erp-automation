@@ -177,6 +177,36 @@ python3 scripts/fill_by_vision.py \
 | 视觉分析 | **qwen3.6-plus** (阿里百炼) | DashScope | `DASHSCOPE_API_KEY` |
 | 文本生成 | **deepseek-v4-pro** | DeepSeek | `DEEPSEEK_API_KEY` |
 
+### API Endpoint 详解
+
+| 平台 | Base URL | 兼容协议 | 路由逻辑 |
+|------|----------|---------|---------|
+| **阿里百炼 DashScope** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI SDK 兼容 | 所有模型名不含 `deepseek` 的走此路由 |
+| **DeepSeek** | `https://api.deepseek.com/v1`（默认） | OpenAI SDK 兼容 | 模型名含 `deepseek` 的走独立客户端 |
+
+**自动路由实现**（`services/llm_client.py`）：
+
+LLMClient 内部有两个独立的 OpenAI 客户端：
+- `_client` — DashScope 客户端，用于 `qwen-*` 系列模型
+- `_deepseek_client` — DeepSeek 客户端，用于 `deepseek-*` 系列模型
+
+路由逻辑：模型名 `lower()` 是否含 `"deepseek"`。
+
+**.env 文件完整配置示例：**
+```bash
+# === 阿里百炼 DashScope（视觉分析）===
+DASHSCOPE_API_KEY=sk-44dc747ec9b044ea886cdd468ad3a851
+
+# === DeepSeek（文本/CNC编程）===
+DEEPSEEK_API_KEY=sk-xxxx
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1   # 可选，默认值
+
+# === 阿里百炼完整 endpoint（代码默认值，一般无需改）===
+# DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+> **说明**：阿里百炼 DashScope 使用 OpenAI 兼容接口，`LLMClient` 默认 base_url 已正确配置。除非切换平台（如用 vLLM 自部署），否则不需要额外设置。
+
 ## 一键运行
 
 ```bash

@@ -80,12 +80,30 @@ CNC 编程流水线（`run_cnc_pipeline.py`）每次执行耗时长（单零件 
 
 ## ⚡ 新系统适配 5步工作流（Hermes / OpenClaw 通用）
 
-### Step 1 — 用户配置 API Key
+### Step 1 — 用户配置 API Key + 系统账号密码
 用户提供：
 - **阿里百炼 API Key**（视觉分析，qwen3.6-plus）
 - **DeepSeek / 大模型 API Key**（工艺推理、CNC编程）
+- **ERP 系统账号密码**（`ERP_{account}_PASSWORD`，默认账号 472）
 
 配置方式：写入 `.env` 文件（路径 `~/.hermes/senlan-automation/.env`）
+
+完整 `.env` 示例：
+```bash
+# 阿里百炼 DashScope（视觉分析，从 https://bailian.console.aliyun.com/ 获取）
+DASHSCOPE_API_KEY=***
+
+# DeepSeek（文本生成/CNC编程，从 https://platform.deepseek.com/ 获取）
+DEEPSEEK_API_KEY=***
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+
+# ERP 系统密码（账号由 --account 传入，默认 472）
+ERP_472_PASSWORD=***
+# 多账号：ERP_473_PASSWORD=***
+```
+
+> `.env` 敏感文件，切勿提交 Git。`load_dotenv` 自动加载。
+> `--account` 参数默认 472，`fill_by_vision.py` 运行时按账号名读取 `ERP_{account}_PASSWORD`。
 
 ### Step 2 — 用户提供图纸路径
 - 用户指定图纸目录，命名约定 `{生产单号}-{零件号}.pdf`
@@ -195,11 +213,15 @@ LLMClient 内部有两个独立的 OpenAI 客户端：
 **.env 文件完整配置示例：**
 ```bash
 # === 阿里百炼 DashScope（视觉分析）===
-DASHSCOPE_API_KEY=sk-44dc747ec9b044ea886cdd468ad3a851
+DASHSCOPE_API_KEY=***
 
 # === DeepSeek（文本/CNC编程）===
-DEEPSEEK_API_KEY=sk-xxxx
+DEEPSEEK_API_KEY=***
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1   # 可选，默认值
+
+# === ERP 系统密码（账号由 --account 传入）===
+ERP_472_PASSWORD=***
+# 多账号：ERP_473_PASSWORD=***
 
 # === 阿里百炼完整 endpoint（代码默认值，一般无需改）===
 # DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1

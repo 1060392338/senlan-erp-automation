@@ -1,14 +1,14 @@
-# 森蓝ERP工艺自动化工作流 — 迁移配置指引
+# 森蓝ERP自动化 — 新机器配置指引 V6
 
 ## 目录
 
 1. [环境要求](#1-环境要求)
-2. [依赖安装](#2-依赖安装)
-3. [项目结构](#3-项目结构)
-4. [文件清单](#4-文件清单)
-5. [配置文件](#5-配置文件)
-6. [API密钥](#6-api密钥)
-7. [快速验证](#7-快速验证)
+2. [拉取项目](#2-拉取项目)
+3. [安装依赖](#3-安装依赖)
+4. [配置 API Key](#4-配置-api-key)
+5. [启动 Chrome](#5-启动-chrome)
+6. [快速验证](#6-快速验证)
+7. [首次运行全流程](#7-首次运行全流程)
 8. [常见问题](#8-常见问题)
 
 ---
@@ -18,135 +18,74 @@
 | 组件 | 要求 |
 |------|------|
 | Python | ≥ 3.9 |
-| 浏览器 | Chrome（本地安装） |
-| 操作系统 | macOS / Linux / Windows |
+| Chrome | 已安装（本地版，非 Chromium） |
+| 操作系统 | macOS（Linux/Windows 理论兼容，未测试） |
 | API | 阿里百炼(视觉) + DeepSeek(文本) |
+| Git | 有 GitHub 仓库访问权限 |
 
-## 2. 依赖安装
+## 2. 拉取项目
+
+```bash
+cd ~/.hermes
+git clone https://github.com/1060392338/senlan-erp-automation.git
+cd senlan-automation
+```
+
+## 3. 安装依赖
 
 ```bash
 # 核心依赖
 pip install playwright openai python-dotenv Pillow PyMuPDF
 
+# 大陆网络慢时用清华镜像：
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple playwright openai python-dotenv Pillow PyMuPDF
+
 # 安装 Playwright 浏览器
 playwright install chromium
-# 或使用已安装的Chroma（channel="chrome"）
 ```
 
-**注意**: 如果 `pip install` 在大陆网络下慢，可使用镜像：
-```bash
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple playwright openai python-dotenv Pillow PyMuPDF
-```
+**PyMuPDF** 约 22MB，用于 PDF→PNG。安装失败会自动降级到其他策略（sips/macOS内置、ImageMagick）。
 
-**PyMuPDF** 约 22MB，用于 PDF→PNG 转换（策略1，最快）。如果安装失败，脚本会自动降级到其他策略（sips / ImageMagick）。
-
-## 3. 项目结构
-
-```
-~/.hermes/senlan-automation/
-├── .env                          # API keys + 配置（不提交 Git）
-├── MEMORY.md                     # 项目记忆文件（新Agent启动先读）
-├── HANDOFF_TO_CLAUDE.md          # 交接文档
-├── config/
-│   └── dropdown_options.py       # 49个ERP工序选项
-├── services/
-│   ├── llm_client.py             # LLM网关（视觉+文本+PDF→base64）
-│   ├── playwright_erp.py         # Playwright ERP封装
-│   ├── browser_service.py        # 浏览器服务
-│   └── prompt_service.py         # Jinja2提示词渲染
-├── workflows/
-│   └── erp_process/
-│       ├── process_reasoning.py  # ⭐特征驱动推理引擎
-│       ├── agents/
-│       │   ├── vision_agent.py   # 视觉分析Agent
-│       │   ├── cnc_agent.py      # CNC编程Agent
-│       │   ├── review_agent.py   # 自审+交叉审查Agent
-│       │   └── supervisor.py     # 监督Agent
-│       └── prompts/              # Jinja2提示词模板
-├── templates/prompts/
-│   └── vision/
-│       ├── analyze.j2            # 视觉分析提示词
-│       ├── system.j2             # 视觉系统提示词
-│       └── few_shot.j2           # 少样本示例
-├── scripts/
-│   ├── fill_by_vision.py         # ⭐全流程入口（主脚本）
-│   ├── run_cnc_pipeline.py       # CNC编程流水线
-│   └── cleanup_processes.py      # 清理多余工序行
-├── data/
-│   ├── chrome_data/playwright/   # Chrome持久化登录态
-│   └── drawings/                 # 测试图纸
-└── .hermes/plans/                # 历史规划文档
-```
-
-## 4. 文件清单
-
-### 核心文件（必须）
-
-| 文件 | 说明 | 修改频率 |
-|------|------|---------|
-| `scripts/fill_by_vision.py` | 入口脚本，命令行交互，浏览器操作 | 新功能时 |
-| `workflows/erp_process/process_reasoning.py` | 特征→工序映射、排序、工时、备注 | 工艺规则调整 |
-| `config/dropdown_options.py` | ERP 49道工序选项编码 | ERP新增工序时 |
-| `.env` | API Keys | 更换API时 |
-
-### Agent文件
-
-| 文件 | 模型 | 说明 |
-|------|------|------|
-| `agents/vision_agent.py` | qwen-vl-max | 调用阿里百炼视觉分析图纸 |
-| `agents/cnc_agent.py` | deepseek-v4-pro | 生成数控精车/镜面放电G代码 |
-| `agents/review_agent.py` | deepseek-v4-pro | 自审+交叉审查CNC代码 |
-
-### 提示词文件
-
-| 文件 | 影响 |
-|------|------|
-| `templates/prompts/vision/analyze.j2` | 视觉AI提取的特征参数详细程度 |
-| `templates/prompts/vision/system.j2` | 视觉AI的识别规则 |
-| `templates/prompts/vision/few_shot.j2` | 少样本示例，影响识别质量 |
-
-## 5. 配置文件
-
-### `.env` 文件
+## 4. 配置 API Key
 
 在项目根目录创建 `.env`：
 
 ```bash
-# 阿里百炼（视觉分析）
-DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# 阿里百炼（视觉分析，从 https://bailian.console.aliyun.com/ 获取）
+DASHSCOPE_API_KEY=sk-xxxx
 
-# DeepSeek（CNC编程、文本生成）
-DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# DeepSeek（文本生成/CNC编程，从 https://platform.deepseek.com/ 获取）
+DEEPSEEK_API_KEY=sk-xxxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # ERP账号密码
 ERP_472_PASSWORD=123456
-# 如需多账号: ERP_473_PASSWORD=xxx, ERP_474_PASSWORD=xxx
+# 多账号: ERP_473_PASSWORD=xxx
 ```
 
-### 脚本参数
+**.env 是敏感文件，不要提交到 Git**（已在 `.gitignore` 中排除）。
+
+## 5. 启动 Chrome
+
+CNC 编程流水线（`run_cnc_pipeline.py`）不需要浏览器。
+但 ERP 流程（`fill_by_vision.py`）需要带 CDP 端口的 Chrome。
 
 ```bash
-python3 scripts/fill_by_vision.py \
-    --drawings-dir /Volumes/m2/erp/ \   # 图纸目录
-    --prod-no C03026051501 \             # 生产单号（可选过滤）
-    --parts 001,002 \                    # 零件号子集（可选过滤）
-    --account 472 \                      # ERP账号
-    --gen-cnc                            # 生成CNC代码（可选）
+# 启动 Chrome 持久化实例（端口 9222）
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --remote-debugging-port=9222 \
+    --remote-allow-origins=* \
+    --user-data-dir="$HOME/.hermes/senlan-automation/data/chrome_data/playwright" \
+    --disable-extensions \
+    --window-size=1920,1080 &
 ```
 
-## 6. API密钥
+首次启动需要手动登录 ERP（http://112.74.35.30），账号 472 / 密码 123456。
+登录成功后浏览器保持打开，后续自动化复用登录态。
 
-| 平台 | 用途 | 获取方式 |
-|------|------|---------|
-| 阿里百炼(DashScope) | 视觉分析 qwen-vl-max | https://bailian.console.aliyun.com/ → API-KEY |
-| DeepSeek | 文本生成 deepseek-v4-pro | https://platform.deepseek.com/ → API Keys |
+> **注意**: `--remote-debugging-port=9222` 和 `--remote-allow-origins=*` 必须同时带，否则 CDP WebSocket 返回 403。
 
-**视觉API计费**: qwen-vl-max ¥1.6/百万输入tokens, ¥4/百万输出tokens。一次分析约 ¥0.03。
-
-## 7. 快速验证
-
-### 最小验证（单零件）
+## 6. 快速验证
 
 ```bash
 cd ~/.hermes/senlan-automation
@@ -156,55 +95,97 @@ python3 -c "import playwright; print('playwright OK')"
 python3 -c "import fitz; print('PyMuPDF OK')"
 python3 -c "from dotenv import load_dotenv; print('dotenv OK')"
 
-# 检查API密钥
+# 检查 API key
 cat .env | grep -E "DASHSCOPE|DEEPSEEK"
 
-# 运行单零件流程
-python3 scripts/fill_by_vision.py \
-    --drawing /Volumes/m2/erp/C03026051501-001.pdf \
-    --prod-no C03026051501 \
-    --account 472
+# 检查 Chrome 端口
+curl -s http://localhost:9222/json/version | python3 -c "import sys,json; print(json.load(sys.stdin).get('Browser','❌ Chrome not running'))"
+
+# 跑单元测试（< 1min）
+python3 -m pytest tests/ -v -k "not test_fill" --tb=short
 ```
 
-### 完整验证（多零件）
+期望输出：
+- playwright OK ✅
+- PyMuPDF OK ✅ 
+- dotenv OK ✅
+- API key 有值 ✅
+- Chrome 端口返回浏览器版本信息 ✅
+- 117 passed ✅
+
+## 7. 首次运行全流程
+
+### 7.1 准备图纸
+
+图纸 PDF 放到任意目录，文件名格式：
+```
+{生产单号}-{零件号}.pdf
+示例:
+  C03026051501-001.pdf
+  C03026051501-002.pdf
+  W20126051401.pdf        (无零件号)
+```
+
+### 7.2 全自动流程（一条命令）
 
 ```bash
+cd ~/.hermes/senlan-automation
+
+# 扫描图纸目录 → 视觉分析 → 推理 → 填ERP → CNC编程
 python3 scripts/fill_by_vision.py \
-    --drawings-dir /Volumes/m2/erp/ \
+    --drawings-dir /path/to/drawings \
     --prod-no C03026051501 \
     --account 472
 ```
 
-### 预期输出
+自动完成：
+1. 扫描目录 → 文件名提取 `(prod_no, part_no)` 对
+2. 视觉分析（阿里百炼 qwen3.6-plus，每张 ~3min）
+3. 特征推理 → 确定工序顺序+参数
+4. Playwright ERP → 搜索行 → 弹窗填充 → 保存
+5. CNC 编程流水线（精车+放电并行编程 → 自审 → 交叉审查）
+6. 保存结果到 `data/cnc_{prod_no}-{part_no}.json`
+
+### 7.3 单独跑 CNC 编程
+
+如果已有分析缓存（`data/analysis_cache_{prod_no}.json`），可单独重跑 CNC：
+
+```bash
+python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
+```
+
+### 7.4 完整流程图
 
 ```
-✅ 全流程完成! 成功 2/2
-处理零件:
-  C03026051501: {'001': 11道工序, '002': 10道工序}
+图纸PDF → 文件名解析(prod_no, part_no)
+  → 批量视觉分析(qwen3.6-plus)
+  → 特征驱动推理(5层模型)
+  → ERP浏览器操作(填计划工艺)
+  → CNC编程流水线:
+      精车 ──┐ 并行
+      放电 ──┘  → 自审 → 交叉审查
+  → 保存 data/cnc_{prod_no}-{part_no}.json
 ```
 
 ## 8. 常见问题
 
-### Q: 浏览器弹不出来？
-A: 脚本使用 `headless=False` 显示Chrome窗口。确认Chrome已安装。如使用远程SSH，需要 `--headless` 模式（需改代码）。
+### Q: Chrome 连不上 CDP 端口？
+A: 检查启动命令是否带了 `--remote-debugging-port=9222 --remote-allow-origins=*`。两个 flag 缺一不可。用 `curl http://localhost:9222/json/version` 测试。
+
+### Q: ERP 登录失败？
+A: 首次登录需要短信验证码。Chrome 持久化登录态后，下次自动复用。密码在 `.env` 文件 `ERP_{account}_PASSWORD`。
 
 ### Q: 视觉分析一直卡住？
-A: qwen-vl-max 约 3 分钟/次，这是正常API延迟。如果超过 5 分钟，检查 `DASHSCOPE_API_KEY` 是否有效。
-
-### Q: ERP登录失败？
-A: 确认账号密码正确。首次登录可能需要短信验证码。使用 `persistent_context` 可保持登录态。
+A: qwen3.6-plus 正常延迟约 2-3 分钟/张。超过 5 分钟检查 `DASHSCOPE_API_KEY` 是否有效。
 
 ### Q: 找不到生产单？
-A: 遍历三个标签（未发送→BOM清单→已发送）。新同步的订单通常在「未发送」标签。
+A: 脚本自动遍历三个标签页：未发送 → BOM清单 → 已发送。新同步的单通常在「未发送」。
 
-### Q: 弹窗保存后无法操作？
-A: 脚本已设计为每个零件独立开浏览器，保存后关闭再开新的。这是当前稳定的方案。
+### Q: CNC 编程卡在 LLM 调用？
+A: DeepSeek API 响应慢是正常的（精车 ~110s，放电 ~140s）。精车+放电并行等 LLM，总约 2-3 分钟。用 `notify_on_complete` 后台模式运行，避免 terminal timeout。
 
-### Q: 多零件处理零件号不匹配？
-A: 确认图纸文件名格式为 `{生产单号}-{零件号}.pdf`。零件号可以是任意字符串（001/A1/M1），从文件名 `-` 后动态提取。
-
-### Q: 如何加速？
-A: 视觉分析是唯一瓶颈（~3min/张）。可换用 `qwen-vl-max-lite` 或批量处理。
+### Q: 如何重装/重置？
+A: 删除 `data/chrome_data/playwright/` 目录清空登录态，重新启动 Chrome 登录。
 
 ---
 

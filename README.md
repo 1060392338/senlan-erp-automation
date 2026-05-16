@@ -78,9 +78,7 @@ senlan-automation/
 │   ├── system.j2                  ← 视觉系统提示词
 │   └── few_shot.j2                ← 少样本示例
 ├── .env                           ← API Keys（不上传git）
-├── SETUP_GUIDE.md                 ← 迁移配置指引
-├── MEMORY.md                      ← 项目记忆（跨会话）
-└── HANDOFF_TO_CLAUDE.md           ← 交接文档
+├── SETUP_GUIDE.md                 ← 新机器配置指引\n└── MEMORY.md                      ← 项目记忆（跨会话）
 ```
 
 ## 五层推理引擎

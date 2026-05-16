@@ -1,99 +1,126 @@
-# 🏭 森蓝精密 · ERP 工艺自动化系统
+# 🏭 森蓝精密 · ERP 工艺自动化系统 V5.5
 
-> 销售订单 → AI读2D图纸 → 五层工艺推理 → CNC代码生成 → ERP回填全部工序
-
-**⚠️ 当前状态：项目已全面从 DrissionPage 迁移到 Playwright。**
-已删除24个旧脚本，重写了核心服务层。详见 `HANDOFF_TO_CLAUDE.md`。
+> AI读2D工程图 → 五层特征驱动推理 → ERP自动填入全部工序 → CNC代码生成 → 飞书通知
 
 ## 快速开始
 
 ```bash
-# 1. 安装依赖
-pip install playwright && playwright install chromium
+cd ~/.hermes/senlan-automation
 
-# 2. 配置已在 .env 中（API Key + ERP密码）
+# 多零件模式：扫描图纸目录，自动发现所有生产单
+python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --account 472
 
-# 3. 运行完整流程（推荐）
-python3 scripts/fill_by_vision.py --prod-no W01626051501
+# 指定单号+零件子集
+python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --prod-no C03026051501 --parts 001,002 --account 472
 
-# 4. 运行工作流
-python main.py --bot bot_a --tenant senlan_472 --agent erp_process_agent \
-  --input '{"prod_no":"W01626051501","customer":"客户X"}'
+# 单张图纸（旧版兼容）
+python3 scripts/fill_by_vision.py --drawing /path/to/pdf --prod-no W20126051401 --account 472
 
-# 5. 查看可选租户和工作流
-python main.py --list
+# 带CNC代码生成
+python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --prod-no C03026051501 --account 472 --gen-cnc
 ```
 
-## 入口脚本
+**无需手动 export 环境变量** — `.env` 由脚本自动加载。
 
-```bash
-# Playwright 完整流程（登录→导航→搜索→弹窗→填工序→保存）
-python3 scripts/fill_by_vision.py --prod-no W01626051501
+## 核心流程
 
-# 带图纸路径（启用阿里百炼视觉分析）
-python3 scripts/fill_by_vision.py --drawing /path/to/图纸.jpg --prod-no W01626051501
+```
+图纸PDF (目录扫描)
+  → { 生产单号-零件号.pdf } 文件名驱动匹配
+  → PyMuPDF 转 PNG (~0.1s)
+  → 阿里百炼 qwen-vl-max 视觉分析 (~3min/张)
+  → 特征驱动推理引擎:
+      L1: 零件类型 + 材料 (圆件/方件)
+      L2: 几何特征 → 工序映射 (16种特征类型)
+      L3: 5原则排序 (热处分水岭/粗前精后/基准先行/慢丝在后/表面最后)
+      L4: 工时估算 (按尺寸/数量/粗糙度自适应)
+      L5: 特殊要求 (刻字/利角/涂层)
+  → ERP浏览器操作:
+      遍历标签页 (未发送→BOM清单→已发送)
+      按 生产单号+零件号 双条件匹配行
+      开弹窗 → 填全部工序 → 保存
+  → 飞书私聊通知完成状态
 ```
 
-## 架构
+## 多零件生产单支持
+
+| 文件命名 | 含义 |
+|----------|------|
+| `C03026051501-001.pdf` | 生产单 C03026051501, 零件号 001 |
+| `C03026051501-002.pdf` | 生产单 C03026051501, 零件号 002 |
+| `C03026051501-A1.pdf` | 生产单 C03026051501, 零件号 A1 |
+| `W20126051401.pdf` | 单零件, 无零件号 |
+
+**关键设计**：
+- 文件名驱动： `(prod_no, part_no)` 从文件名用第一个 `-` 切分提取
+- 跨标签搜索：每个零件遍历全部三个标签页
+- 独立浏览器：每零件保存后关闭浏览器，避免弹窗遮罩残留
+- 零件号无格式限制：001/002/A1/M1 均可
+
+## 项目结构
 
 ```
 senlan-automation/
-├── config/
-│   ├── __init__.py
-│   └── dropdown_options.py     ← ERP工序选项统一配置（49选项+映射）
 ├── scripts/
-│   └── fill_by_vision.py       ← Playwright主入口
-├── services/
-│   ├── browser_service.py      ← Playwright浏览器工厂（含DrissionPage兼容层）
-│   ├── playwright_erp.py       ← Playwright ERP交互封装
-│   ├── llm_client.py           ← DashScope LLM网关
-│   └── ...
+│   └── fill_by_vision.py          ⭐ 全流程入口（678行）
 ├── workflows/erp_process/
-│   ├── process_reasoning.py    ← 五层工艺推理引擎
-│   ├── _login.py               ← Playwright登录逻辑
-│   ├── nodes/
-│   │   ├── process_filler.py   ← 填计划工艺
-│   │   ├── routing_filler.py   ← [废弃] CNC代码通过飞书机器人返回
-│   │   └── ...
+│   ├── process_reasoning.py       ⭐ 特征驱动推理引擎（728行）
 │   ├── agents/
-│   │   ├── vision_agent.py     ← 阿里百炼视觉分析
-│   │   ├── cnc_agent.py        ← CNC编程
-│   │   └── ...
-├── .env                        ← 已配置真实凭据
-├── HANDOFF_TO_CLAUDE.md        ← 项目交接文档
-└── ARCHITECTURE.md             ← 架构约束
+│   │   ├── vision_agent.py        ← 阿里百炼视觉分析
+│   │   ├── cnc_agent.py           ← CNC编程Agent
+│   │   └── review_agent.py        ← 自审+交叉审查
+│   └── prompts/                   ← Jinja2提示词模板
+├── config/
+│   └── dropdown_options.py        ← 49个ERP工序选项
+├── services/
+│   ├── llm_client.py              ← LLM网关（PDF→base64）
+│   └── playwright_erp.py          ← Playwright ERP封装
+├── templates/prompts/vision/
+│   ├── analyze.j2                 ← 视觉分析提示词
+│   ├── system.j2                  ← 视觉系统提示词
+│   └── few_shot.j2                ← 少样本示例
+├── .env                           ← API Keys（不上传git）
+├── SETUP_GUIDE.md                 ← 迁移配置指引
+├── MEMORY.md                      ← 项目记忆（跨会话）
+└── HANDOFF_TO_CLAUDE.md           ← 交接文档
 ```
 
-## 五层工艺推理引擎
+## 五层推理引擎
 
 `workflows/erp_process/process_reasoning.py`
 
 | 层级 | 名称 | 实现 |
 |:----:|------|------|
-| L1 | 零件类型+材料 | 视觉读标题栏 → 方形/圆形决策 |
-| L2 | 几何特征提取 | Qwen-VL + OCR → 孔/槽/螺纹/粗糙度 |
-| L3 | 工序排序逻辑 | 5原则规则引擎（先粗后精/热处理分水岭/基准先行/慢丝在精铣后/表面处理最后） |
-| L4 | 切削参数 | 材料+硬度→经验值→填入remark |
-| L5 | 特殊要求 | Sharp edge/TiN/刻字→注意事项插入 |
+| L1 | 零件类型 | 视觉读标题栏 → 圆件/方件/异形 + ASTAVA ESR/S136/K490 |
+| L2 | 特征提取 | 16种特征类型 → FEATURE_PROCESS_MAP 映射到工序 |
+| L3 | 排序规则 | 热处分水岭(<25粗加工/25热处理/≥25精加工) |
+| L4 | 工时估算 | 尺寸×数量×粗糙度自适应，英制自动检测×25.4 |
+| L5 | 特殊要求 | Sharp edge/TiN/刻字 → 嵌入对应工序备注 |
 
-**形状→工艺路线规则**：
-- 方形→铣→磨→放电（15道工序）
-- 圆形→车→磨→放电（8道工序）
+## 模型配置
 
-**工序名到ERP下拉选项的映射**见 `process_reasoning.py:map_to_erp_processes()`
+| 用途 | 模型 | API |
+|------|------|-----|
+| 视觉分析 | qwen3.6-plus (阿里百炼) | DashScope |
+| 文本/编程 | deepseek-v4-pro | DeepSeek |
 
-## ✅ 当前状态
+## 红线
 
-VXE工序下拉选择 ✅ 已解决（直接操作VXE数据对象 `vm.getData()` 设置 `table_type`/`table_name` 绕过DOM下拉）。下一步：集成阿里百炼视觉分析 + LangGraph工作流端到端。
+- ❌ 禁止胡编乱造工序（必须来自图纸分析结果）
+- ❌ 禁止使用模板/占位数据/fallback工艺
+- ❌ 禁止操作非目标生产单
+- ❌ 禁止 git push 未经允许
 
 ## 技术栈
 
 | 组件 | 选型 |
 |------|------|
-| 浏览器 | **Playwright** (替代旧DrissionPage) |
-| LLM | DashScope Qwen-Max / Qwen-VL |
-| 视觉模型 | 阿里百炼 qwen3.6-plus |
-| CNC模板 | Jinja2 |
-| 通知 | 飞书 Webhook / API |
-| 配置 | YAML + .env |
+| 浏览器自动化 | Playwright (persistent_context) |
+| LLM视觉 | 阿里百炼 qwen3.6-plus |
+| LLM文本 | DeepSeek v4-pro |
+| PDF→PNG | PyMuPDF (策略1) |
+| 通知 | 飞书 API (用户私聊) |
+| 配置 | .env (load_dotenv自动加载) |
 | Python | 3.9+ |
+
+> 完整迁移配置指南见 `SETUP_GUIDE.md`

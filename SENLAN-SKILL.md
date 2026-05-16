@@ -77,12 +77,12 @@ related_skills:
 
 | 文件 | 作用 |
 |------|------|
-| `scripts/fill_by_vision.py` | 全流程入口 |
-| `services/playwright_erp.py` | ERP页面交互 |
-| `workflows/erp_process/process_reasoning.py` | 特征驱动推理引擎 |
+| `scripts/fill_by_vision.py` | 全流程入口 — 视觉分析→缓存→推理→填ERP |
+| `services/playwright_erp.py` | ERP页面交互（登录、搜索、表格填充） |
+| `workflows/erp_process/process_reasoning.py` | 特征驱动推理引擎（五层读图逻辑） |
 | `workflows/erp_process/prompts/vision_prompt.py` | 视觉分析提示词 |
 | `services/llm_client.py` | 双 provider 路由 |
-| `scripts/run_cnc_pipeline.py` | CNC 编程流水线 |
+| `scripts/run_cnc_pipeline.py` | CNC 编程流水线 — 接收真实分析数据生成G代码 |
 | `config/dropdown_options.py` | 工序选项映射 |
 | `SETUP_GUIDE.md` | 环境配置指引 |
 | `MEMORY.md` | 踩坑速查 |
@@ -90,6 +90,8 @@ related_skills:
 阅读完成后输出**执行计划摘要**给用户确认。
 
 ### Step 4 — 执行流程
+
+① **运行 `fill_by_vision.py`** — 视觉分析→缓存→推理→填ERP：
 ```bash
 cd ~/.hermes/senlan-automation
 python3 scripts/fill_by_vision.py \
@@ -97,12 +99,33 @@ python3 scripts/fill_by_vision.py \
     --prod-no C03026051501 \
     --account 472
 ```
+`fill_by_vision.py` 自动完成：
+- 扫描图纸目录 → 文件名提取 `{prod_no}-{part_no}`
+- 批量视觉分析（阿里百炼 qwen3.6-plus）
+- 特征驱动推理 → 确定工序顺序+参数
+- 保存分析缓存 `data/analysis_cache_{prod_no}.json`
+- Playwright 登录ERP → 搜索→填充→保存（每个零件独立浏览器）
+
+② **运行 `run_cnc_pipeline.py`** — 读取真实分析数据生成G代码（必须承接上一步）：
+```bash
+# 从刚刚保存的分析缓存读取真实数据
+python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
+```
+`run_cnc_pipeline.py` 自动：
+- 读取 `data/analysis_cache_{prod_no}.json`（真实零件信息+特征+特殊要求）
+- 对「数控精车」（TAKISAWA NEX-108）和「镜面放电」（SODICK AD32LS）两道工序
+- 编程Agent → 生成G代码 → 自审Agent → 交叉审查Agent
+- 保存结果到 `data/cnc_pipeline_result.json`
+
+③ **CNC 代码返回飞书**（见 Step 5）
+
+⚠️ **重要**：两步必须顺序执行，`fill_by_vision.py` 必须先运行产生分析缓存，`run_cnc_pipeline.py` 才能读取真实数据。禁止用硬编码假数据跑 CNC 管道。
 
 ### Step 5 — CNC 代码全量返回飞书（必须）
 
 流程完成后，CNC 代码必须**全量返回**到用户飞书私聊，不是只发摘要/通知。
 
-**发送内容**（每项都是完整的，不能省略G代码正文）：
+**发送内容**（来自 `data/cnc_pipeline_result.json`，每项都是完整的）：
 - 生产单号 + 零件号标识
 - 工序名称：**数控精车**（TAKISAWA NEX-108）
   - G代码正文（Markdown 代码块，完整可复制上机）
@@ -112,10 +135,13 @@ python3 scripts/fill_by_vision.py \
   - 电参数/电极说明
 - 质量报告摘要（自审通过/交叉审查 verdict）
 
-**实现方式**：
-- 运行完 `fill_by_vision.py` 后，读取 `data/cnc_pipeline_result.json`
-- 用飞书 API 发送两段完整 G代码（`POST /open-apis/im/v1/messages`，msg_type=text）
-- 不要只发文件路径或 JSON 摘要，用户要的是**直接能看的 G 代码**
+**实现方式**（三步法，按顺序执行）：
+1. 运行 `fill_by_vision.py`（Step 4 ①）→ 填ERP → 保存 `data/analysis_cache_{prod_no}.json`
+2. 运行 `run_cnc_pipeline.py --prod-no XXX`（Step 4 ②）→ 读取真实分析数据 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_pipeline_result.json`
+3. AI 读取 `data/cnc_pipeline_result.json` 中的完整 G代码正文，用飞书 API 发送到用户私聊（`oc_98be2905a0e66f1d96b31dda7acb40b9`）
+   - msg_type=text，G代码包裹在 markdown 代码块 ` ```gcode ``` ` 中
+   - 数控精车代码 + 镜面放电代码分两条消息发送
+   - 必须包含完整的、可直接复制上机的 G 代码，不要只发摘要
 
 ## 双执行环境
 

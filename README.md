@@ -1,23 +1,22 @@
-# 🏭 森蓝精密 · ERP 工艺自动化系统 V5.5
+| # 🏭 森蓝精密 · ERP 工艺自动化系统 V5.6
 
-> AI读2D工程图 → 五层特征驱动推理 → ERP自动填入全部工序 → CNC代码生成 → 飞书通知
+> AI读2D工程图 → 五层特征驱动推理 → ERP自动填入全部工序 → CNC代码生成（真实图纸数据驱动） → 飞书全量返回G代码
 
 ## 快速开始
 
 ```bash
 cd ~/.hermes/senlan-automation
 
-# 多零件模式：扫描图纸目录，自动发现所有生产单
+# 第一步：扫描图纸目录，自动发现所有生产单 → 视觉分析 → 填ERP → 保存分析缓存
 python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --account 472
 
-# 指定单号+零件子集
+# 第二步：读取上一步保存的分析缓存（真实数据）→ 生成CNC G代码 → 自审 → 交叉审查
+python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
+
+# 第三步：AI读取 data/cnc_pipeline_result.json，发送完整G代码到飞书
+
+# 快捷方式：指定单号+零件子集
 python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --prod-no C03026051501 --parts 001,002 --account 472
-
-# 单张图纸（旧版兼容）
-python3 scripts/fill_by_vision.py --drawing /path/to/pdf --prod-no W20126051401 --account 472
-
-# 带CNC代码生成
-python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --prod-no C03026051501 --account 472 --gen-cnc
 ```
 
 **无需手动 export 环境变量** — `.env` 由脚本自动加载。

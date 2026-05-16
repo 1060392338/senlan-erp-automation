@@ -1,7 +1,7 @@
 ---
 name: senlan-erp-automation
 description: 森蓝ERP工艺全自动化工作流 — 多零件支持 + 文件名驱动匹配 + 独立浏览器
-version: 5.5.1
+version: 5.5.2
 author: Hermes Agent
 metadata:
   hermes:
@@ -41,7 +41,7 @@ related_skills:
 
 1. **通读代码后执行** — Step 3 必须执行，不得跳过。AI 必须先阅读 `scripts/fill_by_vision.py`、`process_reasoning.py`、`playwright_erp.py` 等核心文件，理解现有逻辑后再执行。
 2. **不自己编流程** — 项目代码里已经有登录、搜索、读图、推理、填表、保存、CNC编程的完整实现。AI 的职责是**调用现有代码**，不是重新发明一套。
-3. **不自由发挥逻辑** — 工序推理用 `process_reasoning.py` 的引擎，不需要 AI 自己写一套排序规则。视觉分析用 `vision_prompt.py` 的提示词。页面操作用 `playwright_erp.py` 的方法。**
+3. **不自由发挥逻辑** — 工序推理用 `process_reasoning.py` 的引擎，不需要 AI 自己写一套排序规则。视觉分析用 `vision_prompt.py` 的提示词。页面操作用 `playwright_erp.py` 的方法。
 4. **不篡改参数** — 项目已配置好的默认值（账号472、密码123456、阿里百炼endpoint等）不要自己改。除非用户明确要求。
 5. **流程卡点才是问答时机** — 只在以下场景询问用户：
    - 图纸目录不存在或为空
@@ -342,7 +342,63 @@ POST https://open.feishu.cn/open-apis/im/v1/messages
    receive_id=ou_xxxx, msg_type=text, content=JSON
 ```
 
-## 性能瓶颈
+## CNCCNCCNC CNC Pipeline — Critical Rules（2026-05-16 纠正的重大问题）
+
+### 🚨 历史教训：硬编码假数据陷阱
+
+`run_cnc_pipeline.py` 原本有硬编码 `PART_INFO`（STRIPPER RING/S-7）和 `FEATURES`，每次运行都生成无关零件的G代码。
+**这是严重错误** — CNC 代码必须严格基于图纸视觉分析的结果。
+
+**修复方案**：
+1. `fill_by_vision.py` 新增 `_save_analysis_cache()` — 每张图纸分析后持久化 `part_info`/`features`/`special_reqs` 到 `data/analysis_cache_{prod_no}.json`
+2. `run_cnc_pipeline.py` 去掉硬编码，改为接收 `--prod-no`（从缓存加载）或 `--part-info-json`/`--features-json`（直接传参）
+3. 所有 CNC 提示词模板添加铁律：**只加工特征列表中明确列出的特征，没有的特征不准自己编**
+
+### 正确运行方式
+
+```bash
+# 1. 先跑 ERP 流程（生成分析缓存）
+python3 scripts/fill_by_vision.py --drawings-dir /path --prod-no XXX --account 472
+
+# 2. 再跑 CNC 流水线（从缓存读取真实图纸数据）
+python3 scripts/run_cnc_pipeline.py --prod-no XXX
+
+# 或者不经过缓存，直接传真实数据
+python3 scripts/run_cnc_pipeline.py \
+    --prod-no XXX --part-no 001 \
+    --part-info-json '{"name":"前模镶件","material":"STAVAX ESR",...}' \
+    --features-json '[...]'
+```
+
+### CNC 代码 → 飞书发送
+
+脚本内置的 `_send_feishu_notification()` 可能返回 400（凭据或格式问题）。
+**推荐用 Hermes 的 `send_message` 工具发送 CNC 代码到飞书 DM**：
+
+```
+target = "feishu:oc_98be2905a0e66f1d96b31dda7acb40b9"  # 用户私聊
+message = "包含完整 G 代码 Markdown 代码块的消息"
+send_message(target=target, message=message)
+```
+
+### 铁律 — 提示词模板层面
+
+以下模板全部添加了"禁止虚构特征"约束：
+
+| 模板文件 | 约束内容 |
+|----------|---------|
+| `templates/prompts/cnc/system.j2` | 铁律 #0: "严禁无参考乱编造"，TBD标记法 |
+| `templates/prompts/cnc/turning.j2` | "只加工下面明确列出的特征" |
+| `templates/prompts/cnc/edm.j2` | "只加工下面明确列出的特征" |
+| `templates/prompts/cnc/self_review.j2` | 检查项 #0: "不虚构特征" |
+| `templates/prompts/review/cross_check.j2` | "虚构特征→revision_needed" |
+
+### 自审+交叉审查双重防线
+
+生成 CNC 代码后经过两道审查：
+1. **自审（self_review）**：LLM 自我检查代码、特征真实性、语法安全性
+2. **交叉审查（cross_review）**：识图结果 vs CNC 代码对照检查，特征覆盖度、虚构特征检测
+3. 任何一道审查不通过 → 标记为 `revision_needed` 或 `fail`，用户确认后才发飞书
 
 视觉分析每次调用约 3 分钟（API 延迟）。浏览器操作约 10-15 秒/零件。
 10 零件 ≈ 32 分钟。

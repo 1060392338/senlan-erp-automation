@@ -51,6 +51,26 @@ related_skills:
    - CNC 编程交叉审查未通过需要人工确认
    其他一切流程自动化执行，不要问"可以吗""对不对"这类废话。
 
+### 进度主动告知（CNC 编程期间）
+
+CNC 编程流水线（`run_cnc_pipeline.py`）每次执行耗时长（单零件 5-8 分钟，2 零件 10-15 分钟），且 DeepSeek API 响应慢（单次 LLM 调用约 2-3 分钟）。AI 必须：
+
+1. **启动时告知** — 说明预计总耗时、并行策略（精车+放电同时进行）
+2. **每个零件完成后主动汇报** — 打印进度表，标记已完成/进行中/待处理
+3. **全流程完成后汇总** — 报告每个零件的编程长度、自审结果、交叉审查 verdict
+4. **不要问"跑完了吗"等废话** — 主动用工具检查进程状态和结果文件
+
+进度表格式示例：
+```
+📊 CNC 编程进度
+| 零件 | 精车 | 放电 | 交叉审查 |
+|------|:----:|:----:|:--------:|
+| 001 前模镶件 | ✅ 完成 | ✅ 完成 | ✅ approve |
+| 002 后镶镶件 | ✅ 完成 | ⏳ 进行中 | ⏳ 等待 |
+```
+
+实现方式：AI 定时 poll 后台进程 + 检查 `data/cnc_{prod_no}-{part_no}.json` 结果文件是否存在。
+
 ### 违反后果
 - 自由发挥 = 串改已验证的正确流程 → 用户发现后必须回滚重来
 - 不必要的询问打断用户 → 降低自动化程度
@@ -105,7 +125,7 @@ python3 scripts/fill_by_vision.py \
 - 特征驱动推理 → 确定工序顺序+参数
 - 保存分析缓存 `data/analysis_cache_{prod_no}.json`
 - Playwright 登录ERP → 搜索→填充→保存（每个零件独立浏览器）
-- **自动调度 CNC 编程流水线**（读取分析缓存 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_pipeline_result.json`）
+- **自动调度 CNC 编程流水线**（读取分析缓存 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_{prod_no}-{part_no}.json`）
 
 > 如需单独重跑 CNC 编程（如修改了分析结果后）：
 > ```bash
@@ -116,7 +136,7 @@ python3 scripts/fill_by_vision.py \
 
 流程完成后，CNC 代码必须**全量返回**到用户飞书私聊，不是只发摘要/通知。
 
-**发送内容**（来自 `data/cnc_pipeline_result.json`，每项都是完整的）：
+**发送内容**（来自 `data/cnc_{prod_no}-{part_no}.json`，每项都是完整的）：
 - 生产单号 + 零件号标识
 - 工序名称：**数控精车**（TAKISAWA NEX-108）
   - G代码正文（Markdown 代码块，完整可复制上机）
@@ -128,8 +148,8 @@ python3 scripts/fill_by_vision.py \
 
 **实现方式**（三步法，按顺序执行）：
 1. 运行 `fill_by_vision.py`（Step 4 ①）→ 填ERP → 保存 `data/analysis_cache_{prod_no}.json`
-2. 运行 `run_cnc_pipeline.py --prod-no XXX`（Step 4 ②）→ 读取真实分析数据 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_pipeline_result.json`
-3. AI 读取 `data/cnc_pipeline_result.json` 中的完整 G代码正文，用飞书 API 发送到用户私聊（`oc_98be2905a0e66f1d96b31dda7acb40b9`）
+2. 运行 `run_cnc_pipeline.py --prod-no XXX`（Step 4 ②）→ 读取真实分析数据 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_{prod_no}-{part_no}.json`
+3. AI 读取 `data/cnc_{prod_no}-{part_no}.json` 中的完整 G代码正文，用飞书 API 发送到用户私聊（`oc_98be2905a0e66f1d96b31dda7acb40b9`）
    - msg_type=text，G代码包裹在 markdown 代码块 ` ```gcode ``` ` 中
    - 数控精车代码 + 镜面放电代码分两条消息发送
    - 必须包含完整的、可直接复制上机的 G 代码，不要只发摘要
@@ -442,6 +462,9 @@ send_message(target=target, message=message)
 | _generate_remark() 报 TypeError | roughness_set/rough_vals 加 `str(r)` |
 | CNC审查过严 | 已降标 5 项宽松检查 |
 | 搜索不到订单 | 遍历未发送→BOM清单→已发送 |
+| `wait_for_load_state( networkidle )` 永不返回 | ERP是SPA系统持续轮询，networkidle永远不会触发。用 `goto(timeout=30000)` + `wait_for_timeout(3000-5000)` |
+| `page` 变量在 try 外被引用 | `page = context.new_page()` 在try块内，finally块外 `page.wait_for_timeout()` 报NameError或EventLoopClosed。page访问要加 `if page:` 守卫 |
+| 利角仅写special_reqs不被检测 | `has_sharp` 只检查features不检查special_reqs。补上 `for s in special_reqs: if 利角 in s: has_sharp=True` |
 
 ## 代码审查 — V5.6 改进记录与待办
 

@@ -69,15 +69,15 @@ class PlaywrightERP:
     def login_if_needed(self):
         """检查登录态，需要则登录"""
         page = self._page
-        page.goto(f"{ERP_BASE}/", timeout=15000)
-        page.wait_for_load_state('networkidle', timeout=15000)
+        page.goto(f"{ERP_BASE}/", timeout=30000)
+        page.wait_for_timeout(3000)  # 等SPA渲染
 
         if page.locator('input[name="username"]').count() > 0:
             log.info("需要登录...")
             page.fill('input[name="username"]', os.environ.get("ERP_473_USERNAME", "472"))
             page.fill('input[name="password"]', os.environ.get("ERP_473_PASSWORD", ""))
             page.click("span.login")
-            page.wait_for_load_state('networkidle', timeout=10000)
+            page.wait_for_timeout(5000)  # 等登录跳转
             # 保存storage_state供后续使用
             self._context.storage_state(path="data/chrome_data/erp_auth.json")
             log.info("登录完成")
@@ -89,16 +89,16 @@ class PlaywrightERP:
         """导航到计划工艺页面"""
         page = self._page
         page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
-                  wait_until="domcontentloaded", timeout=15000)
-        page.wait_for_load_state('networkidle', timeout=15000)
+                  timeout=30000)
+        page.wait_for_timeout(3000)  # 等SPA渲染
 
         # 如果还在登录页，补一次登录
         self.login_if_needed()
 
         # 再次导航
         page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
-                  wait_until="domcontentloaded", timeout=15000)
-        page.wait_for_load_state('networkidle', timeout=15000)
+                  timeout=30000)
+        page.wait_for_timeout(3000)  # 等SPA渲染
 
         found = page.locator('input[placeholder="请输入生产单号"]').count() > 0
         log.info(f"到达计划工艺页面: {found}")
@@ -122,7 +122,7 @@ class PlaywrightERP:
 
                 # 点击查询
                 page.locator('button:has-text("查询")').first.click()
-                page.wait_for_load_state('networkidle', timeout=10000)
+                page.wait_for_timeout(3000)  # 等查询结果加载
 
                 # 检查是否找到
                 if page.locator(f"text={prod_no}").count() > 0:
@@ -249,7 +249,7 @@ class PlaywrightERP:
 
         save_btn.click(force=True, timeout=5000)
         log.info("保存: 按钮已点击，等待确认...")
-        page.wait_for_load_state('networkidle', timeout=10000)
+        page.wait_for_timeout(3000)  # 等toast出现
 
         for _ in range(10):
             toast = page.evaluate("""() => {

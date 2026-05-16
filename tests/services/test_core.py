@@ -152,7 +152,7 @@ class TestLLMClient:
         from services.llm_client import LLMClient
 
         client = LLMClient()
-        assert client._default_model == "qwen-max"
+        assert client._default_model == "deepseek-v4-pro"
         assert client.vision_model == "qwen-vl-max"
 
     def test_init_custom_vision(self):
@@ -220,8 +220,8 @@ class TestDrawingRegistry:
         reg = DrawingRegistry(mock_kb)
         reg.register("PO-001", {"name": "test_part", "features": []})
         mock_kb.retrieve.return_value = []
-        result = reg.find_similar("unknown")
-        assert result is None or isinstance(result, str)
+        result = reg.find_similar({"name": "unknown_part"})
+        assert result == []
 
     def test_find_nonexistent(self):
         pytest.importorskip("langchain.schema")
@@ -230,8 +230,8 @@ class TestDrawingRegistry:
         mock_kb = MagicMock()
         mock_kb.retrieve.return_value = []
         reg = DrawingRegistry(mock_kb)
-        result = reg.find_similar("nothing")
-        assert result is None
+        result = reg.find_similar({"name": "does_not_exist"})
+        assert result == []
 
 
 class TestTenantConfig:

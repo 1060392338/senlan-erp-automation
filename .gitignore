@@ -14,6 +14,7 @@ data/vector_index/
 data/states/
 data/analysis_cache_*.json
 data/cnc_pipeline_result.json
+data/cnc_*.json
 data/last_vision_output.json
 data/dialog_*.png
 data/drawing_*.pdf

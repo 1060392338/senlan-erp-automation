@@ -12,6 +12,7 @@
         --special-reqs-json '["利角","TIN涂层"]'
 """
 import argparse, json, logging, os, sys, textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -249,19 +250,21 @@ def run(
         warning = "⚠️ 警告：没有特征数据，生成的CNC代码无参考依据！"
         log.warning(warning)
 
-    code_segments = []
+    code_segments = [None, None]  # [0]=精车, [1]=放电; 保持顺序
 
-    # ── 1. 逐个工序编程 ──
-    for proc in CNC_PROCESSES:
+    # ── 1. 并行编程 + 自审（精车和放电不依赖对方）──
+    def _process_one(idx, proc):
+        """单个工序：编程 → 自审（串行，不换人保质量）"""
+        pname = proc["name"]
+        log.info(f"\n  ── [{idx+1}/2] {pname}（{proc['equipment']}） ──")
         code = gen_code(llm, prompt, proc, part_info or {}, features or [])
-
-        # 修正：如果代码太短或不是G代码，说明LLM没理解，用fallback
+        # fallback检测
         if len(code) < 50 or not any(cmd in code for cmd in ["G0", "M0", "C0"]):
             log.warning(f"  LLM输出异常，使用内置fallback")
             _mat = part_info.get("material","?") if part_info else "?"
             _hdr = part_info.get("hardness","") if part_info else ""
             _pn = part_info.get("name", "未知零件") if part_info else "未知零件"
-            if "精车" in proc["name"]:
+            if "精车" in pname:
                 code = (
                     f"; TAKISAWA NEX-108 — {_pn}\n"
                     f"; Material: {_mat} {_hdr}\n"
@@ -297,20 +300,41 @@ def run(
                     f"C002 (IP=TBD, PW=TBD, VP=TBD)\n"
                     f"G01 Z(TBD) H001\n"
                     f";\n"
+                    f"C003 (IP=TBD, PW=TBD, VP=TBD)\n"
+                    f"G01 Z(TBD) H001\n"
+                    f";\n"
+                    f"G00 Z50.\n"
                     f"M02\n"
                 )
-
-        code_segments.append({
-            "process": proc["name"],
+        review = self_review(llm, prompt, code, pname)
+        return {
+            "process": pname,
             "equipment": proc["equipment"],
             "code": code,
-        })
+            "self_review": review,
+        }
 
-        # ── 2. 自审 ──
-        review = self_review(llm, prompt, code, proc["name"])
-        code_segments[-1]["self_review"] = review
+    with ThreadPoolExecutor(max_workers=len(CNC_PROCESSES)) as ex:
+        futures = {ex.submit(_process_one, i, proc): i for i, proc in enumerate(CNC_PROCESSES)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                code_segments[idx] = fut.result()
+            except Exception as e:
+                log.error(f"  工序 {CNC_PROCESSES[idx]['name']} 失败: {e}")
+                code_segments[idx] = {
+                    "process": CNC_PROCESSES[idx]["name"],
+                    "equipment": CNC_PROCESSES[idx]["equipment"],
+                    "code": f"; {CNC_PROCESSES[idx]['name']} 编程失败: {e}",
+                    "self_review": {"overall": "fail", "issues": [str(e)]},
+                }
 
-    # ── 3. 交叉审查 ──
+    # 按原序排列（精车在前）
+    code_segments = [s for s in code_segments if s is not None]
+    # 确保顺序正确
+    code_segments.sort(key=lambda s: 0 if "精车" in s["process"] else 1)
+
+    # ── 2. 交叉审查（需两道工序都完成）──
     vision_json = json.dumps({
         "part_info": part_info or {},
         "features": features or [],
@@ -318,7 +342,7 @@ def run(
     }, ensure_ascii=False, indent=2)
     cross = cross_review(llm, prompt, code_segments, vision_json)
 
-    # ── 4. 合成 + 输出 ──
+    # ── 3. 合成 + 输出 ──
     result = {
         "prod_no": prod_no,
         "part_no": part_no,
@@ -333,7 +357,8 @@ def run(
 
     out_dir = Path(__file__).parent.parent / "data"
     out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / "cnc_pipeline_result.json"
+    part_tag = f"-{part_no}" if part_no else ""
+    out_path = out_dir / f"cnc_{prod_no}{part_tag}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     log.info(f"已保存: {out_path}")

@@ -16,13 +16,13 @@ def run():
     from playwright.sync_api import sync_playwright as _pw
     from workflows.erp_process.process_reasoning import reason_process, map_to_erp_processes
 
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "sk-44dc747ec9b044ea886cdd468ad3a851")
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     from services.llm_client import LLMClient
     from services.prompt_service import PromptService
     from workflows.erp_process.agents.vision_agent import VisionAgent
 
     uname = os.environ.get("ERP_473_USERNAME", "473")
-    passwd = os.environ.get("ERP_473_PASSWORD", "123456")
+    passwd = os.environ.get("ERP_473_PASSWORD", "")
     prod_no = "W20126051401"
 
     # ── 0. 视觉分析+特征推理 ──

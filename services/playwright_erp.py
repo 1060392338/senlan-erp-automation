@@ -75,7 +75,7 @@ class PlaywrightERP:
         if page.locator('input[name="username"]').count() > 0:
             log.info("需要登录...")
             page.fill('input[name="username"]', os.environ.get("ERP_473_USERNAME", "472"))
-            page.fill('input[name="password"]', os.environ.get("ERP_473_PASSWORD", "123456"))
+            page.fill('input[name="password"]', os.environ.get("ERP_473_PASSWORD", ""))
             page.click("span.login")
             time.sleep(5)
             # 保存storage_state供后续使用

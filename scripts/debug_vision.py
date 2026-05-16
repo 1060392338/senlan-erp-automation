@@ -8,7 +8,7 @@ from services.llm_client import LLMClient
 from services.prompt_service import PromptService
 from workflows.erp_process.agents.vision_agent import VisionAgent
 
-api_key = os.environ.get("DASHSCOPE_API_KEY", "sk-44dc747ec9b044ea886cdd468ad3a851")
+api_key = os.environ.get("DASHSCOPE_API_KEY", "")
 llm = LLMClient(api_key=api_key)
 prompt = PromptService()
 vision = VisionAgent(llm=llm, prompt_service=prompt)

@@ -65,7 +65,7 @@ def _navigate_to_page(page, prod_no: str) -> bool:
             log.info("被重定向到登录页，重新登录")
             import os
             username = os.environ.get("ERP_473_USERNAME", "473")
-            password = os.environ.get("ERP_473_PASSWORD", "123456")
+            password = os.environ.get("ERP_473_PASSWORD", "")
             fill_login_form(page, erp_base, username, password)
             time.sleep(5)
 

@@ -11,7 +11,7 @@ USER_DATA_DIR = "data/chrome_data/playwright"
 def run():
     from playwright.sync_api import sync_playwright as _pw
     uname = os.environ.get("ERP_USERNAME", "472")
-    passwd = os.environ.get("ERP_PASSWORD", "123456")
+    passwd = os.environ.get("ERP_PASSWORD", "")
 
     pw = _pw().start()
     ctx = pw.chromium.launch_persistent_context(

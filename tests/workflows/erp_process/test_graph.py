@@ -21,7 +21,6 @@ class TestGraphCompilation:
         assert "supervisor_agent_run" in nodes  # V3 新增
         assert "erp_reconnect" in nodes
         assert "fill_process_plan" in nodes
-        assert "fill_routing_cnc" in nodes
 
     def test_no_singleton(self):
         from workflows.erp_process.graph import build_erp_graph
@@ -31,13 +30,13 @@ class TestGraphCompilation:
         assert g1 is not g2
 
     def test_interrupt_points(self):
+        """V3+ 编译无中断点（LangGraph编译配置中的 interrupt_after 已移除）"""
         from workflows.erp_process.graph import build_erp_graph
 
         g = build_erp_graph()
         if hasattr(g, "interrupt_after_nodes"):
-            interrupts = g.interrupt_after_nodes
-            assert "fetch_feishu_drawing" in interrupts
-            assert "supervisor_agent_run" in interrupts
+            # 当前编译无中断点，首次中断在外部由飞书流程控制
+            assert len(g.interrupt_after_nodes) == 0
 
     def test_state_schema(self):
         from workflows.erp_process.state import ERPState
@@ -142,7 +141,7 @@ class TestGraphInvocation:
         from workflows.erp_process.state import ERPState
         from workflows.erp_process.nodes import (
             node_login, node_detect_new_orders, node_fetch_drawing,
-            node_erp_reconnect, node_fill_plan, node_fill_routing,
+            node_erp_reconnect, node_fill_plan,
         )
         from workflows.erp_process.graph import node_supervisor_agent_run
 
@@ -153,7 +152,6 @@ class TestGraphInvocation:
         builder.add_node("supervisor_agent_run", node_supervisor_agent_run)
         builder.add_node("erp_reconnect", node_erp_reconnect)
         builder.add_node("fill_process_plan", node_fill_plan)
-        builder.add_node("fill_routing_cnc", node_fill_routing)
 
         builder.add_edge(START, "login_erp")
         builder.add_edge("login_erp", "detect_new_orders")
@@ -161,8 +159,7 @@ class TestGraphInvocation:
         builder.add_edge("fetch_feishu_drawing", "supervisor_agent_run")
         builder.add_edge("supervisor_agent_run", "erp_reconnect")
         builder.add_edge("erp_reconnect", "fill_process_plan")
-        builder.add_edge("fill_process_plan", "fill_routing_cnc")
-        builder.add_edge("fill_routing_cnc", END)
+        builder.add_edge("fill_process_plan", END)
 
         gv3 = builder.compile(checkpointer=MemorySaver())
         assert gv3 is not None

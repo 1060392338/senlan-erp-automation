@@ -56,7 +56,7 @@ class ReviewAgent:
             if not messages:
                 return self._auto_approve(vision_output, cnc_output)
 
-            response = self._llm.chat(messages, model="qwen-max")
+            response = self._llm.chat(messages, model="deepseek-v4-pro")
             if response:
                 result = self._parse_json(response)
                 if result and "final_verdict" in result:

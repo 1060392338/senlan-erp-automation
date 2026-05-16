@@ -40,11 +40,13 @@ DEFAULT_PROCESS_PLAN = [
 
 SENLAN_API_BASE = "http://112.74.35.30"
 
+from config.dropdown_options import ERP_CODE_MAP, NAME_TO_ERP
+
 
 def _navigate_to_page(page, prod_no: str) -> bool:
     """导航到计划工艺页面(Vue SPA路由)
 
-    DrissionPage在节点之间可能回退到chrome://newtab/，
+    Playwright在节点之间可能回退到chrome://newtab/，
     且session cookie不一定保留，所以每次进来都重新登录+导航。
     """
     try:
@@ -62,8 +64,8 @@ def _navigate_to_page(page, prod_no: str) -> bool:
         if 'Login' in current_url:
             log.info("被重定向到登录页，重新登录")
             import os
-            username = os.environ.get("ERP_472_USERNAME", "472")
-            password = os.environ.get("ERP_472_PASSWORD", "123456")
+            username = os.environ.get("ERP_473_USERNAME", "473")
+            password = os.environ.get("ERP_473_PASSWORD", "123456")
             fill_login_form(page, erp_base, username, password)
             time.sleep(5)
 
@@ -206,175 +208,94 @@ def _select_and_open_dialog(page, prod_no: str) -> bool:
 
 
 def _fill_vxe_table_cells(page, process_plan: list) -> bool:
-    """填充VXE工序表格 — 点+按钮加行 → 双击单元格 → 选工序
+    """填充VXE工序表格 — 直接通过vm.getData()操作数据对象
 
-    策略：先清空旧行，再逐行点击「+」添加新行，
-    然后对每行双击工序单元格触发popover，选中对应工序，
-    最后用VXE API填入计划工时/工人/工艺要求。
+    策略：先确保有足够的行（点击+按钮添加），然后通过VXE的vm.getData()
+    直接设置每行的table_type(ERP内部代码)/table_name(显示名)/machine/plan_worker/remark字段。
+    绕过DOM交互，避免VXE proxy模式revert问题。
     """
     try:
         count = len(process_plan)
         log.info(f"填充 {count} 道工序...")
 
-        # === 1. 清空所有现有行（点删除按钮） ===
-        for round_try in range(5):  # 最多删5轮（安全上限）
-            rows_left = page.run_js("""
-                let bws = document.querySelectorAll('.vxe-table--body-wrapper');
-                let bw = bws[bws.length - 1];
-                if (!bw) return 0;
-                return bw.querySelectorAll('.vxe-body--row').length;
-            """)
-            try:
-                rows_left = int(rows_left)
-            except (ValueError, TypeError):
-                rows_left = count
+        # 1. 确保有足够的行（+按钮添加）
+        dom_rows = page.run_js("""
+            let d = null;
+            for (let d2 of document.querySelectorAll('.el-dialog')) {
+                let t = (d2.querySelector('.el-dialog__title') || {}).textContent || '';
+                if (t.trim() === '工艺管理') { d = d2; break; }
+            }
+            let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
+            if (!bw) return 0;
+            return bw.querySelectorAll('.vxe-body--row').length;
+        """)
+        try:
+            dom_rows = int(dom_rows)
+        except (ValueError, TypeError):
+            dom_rows = 0
 
-            if rows_left <= 1:
-                break
+        log.info(f"  当前行数: {dom_rows}")
 
-            page.run_js("""
-                let bws = document.querySelectorAll('.vxe-table--body-wrapper');
-                let bw = bws[bws.length - 1];
-                if (!bw) return;
-                let firstRow = bw.querySelector('.vxe-body--row');
-                if (!firstRow) return;
-                let delIcon = firstRow.querySelector('.el-icon-delete');
-                if (delIcon) delIcon.click();
-            """)
-            time.sleep(0.5)
-            log.info(f"  删除第 {round_try + 1} 行 (剩余 {rows_left})")
-
-        # === 2. 添加 count 行（点「+」按钮） ===
-        for i in range(count):
-            page.run_js("""
-                let bws = document.querySelectorAll('.vxe-table--body-wrapper');
-                let bw = bws[bws.length - 1];
-                if (!bw) return;
-                let firstRow = bw.querySelector('.vxe-body--row');
-                if (!firstRow) return;
-                let plusIcon = firstRow.querySelector('.el-icon-plus');
-                if (plusIcon) plusIcon.click();
-            """)
-            time.sleep(0.8)
-            log.info(f"  添加第 {i + 1} 行")
-
-        # === 3. 清除旧行，然后用VXE API插入新行（带数据）===
-        # 先清空：删除所有行
-        for round_try in range(5):
-            rows_left = page.run_js("""
-                let dialogs = document.querySelectorAll('.el-dialog');
-                let d = null;
-                for (let d2 of dialogs) {
-                    let t = (d2.querySelector('.el-dialog__title') || {}).textContent || '';
-                    if (t.trim() === '工艺管理') { d = d2; break; }
-                }
-                let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
-                if (!bw) return 0;
-                let rows = bw.querySelectorAll('.vxe-body--row');
-                return rows.length;
-            """)
-            try: rows_left = int(rows_left)
-            except: break
-            if rows_left <= 1: break
-            page.run_js("""
-                let dialogs = document.querySelectorAll('.el-dialog');
-                let d = null;
-                for (let d2 of dialogs) {
-                    let t = (d2.querySelector('.el-dialog__title') || {}).textContent || '';
-                    if (t.trim() === '工艺管理') { d = d2; break; }
-                }
-                let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
-                if (!bw) return;
-                let firstRow = bw.querySelector('.vxe-body--row');
-                if (!firstRow) return;
-                let delIcon = firstRow.querySelector('.el-icon-delete, [class*=delete]');
-                if (delIcon) delIcon.click();
-            """)
-            time.sleep(0.5)
-            log.info(f"  删除行 (剩余 {rows_left})")
-
-        # 添加行（点击"+"按钮）
-        for i in range(count):
-            page.run_js("""
-                let dialogs = document.querySelectorAll('.el-dialog');
-                let d = null;
-                for (let d2 of dialogs) {
-                    let t = (d2.querySelector('.el-dialog__title') || {}).textContent || '';
-                    if (t.trim() === '工艺管理') { d = d2; break; }
-                }
-                let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
-                if (!bw) return;
-                let firstRow = bw.querySelector('.vxe-body--row');
-                if (!firstRow) return;
-                let plusIcon = firstRow.querySelector('.el-icon-plus, [class*=plus]');
-                if (plusIcon) plusIcon.click();
-            """)
-            time.sleep(0.8)
-            log.info(f"  添加第 {i + 1} 行")
-
-        # 对每行，双击"工序"cell，选值
-        for idx, step in enumerate(process_plan):
-            step_name = step.get("name", "")
-            hours = step.get("machine_hours", 0)
-            worker = step.get("worker", "")
-            remark = step.get("remark", "")
-            log.info(f"  填充第 {idx + 1} 行: {step_name}")
-
-            # 找到第idx行
-            vxe_ok = page.run_js(f"""
-                let dialogs = document.querySelectorAll('.el-dialog');
-                let d = null;
-                for (let d2 of dialogs) {{
-                    let t = (d2.querySelector('.el-dialog__title') || {{}}).textContent || '';
-                    if (t.trim() === '工艺管理') {{ d = d2; break; }}
-                }}
-                let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
-                let rows = bw.querySelectorAll('.vxe-body--row');
-                if (rows.length <= {idx}) return 'no_row_' + rows.length;
-                let row = rows[{idx}];
-                let cells = row.querySelectorAll('td');
-
-                // 找data-field=工序 或 包含"工序"文本的列
-                let processCell = null;
-                let headerCells = d.querySelectorAll('.vxe-header--row th');
-                let processIdx = -1;
-                headerCells.forEach((h, i) => {{
-                    let field = h.getAttribute('data-field') || '';
-                    let title = (h.querySelector('.vxe-cell--title') || {{}}).textContent || '';
-                    if (field.includes('process') || field.includes('table_type') || title.includes('工序')) {{
-                        processIdx = i;
-                    }}
-                }});
-                if (processIdx >= 0 && cells.length > processIdx) {{
-                    processCell = cells[processIdx];
-                }}
-                if (!processCell) return 'no_process_cell';
-
-                // 双击进入编辑
-                processCell.dispatchEvent(new MouseEvent('dblclick', {{bubbles: true, detail: 2}}));
-                return 'dblclicked';
-            """)
+        if dom_rows < count:
+            log.info(f"  行数不足，通过+图标添加{count - dom_rows}行...")
+            for i in range(count - dom_rows + 2):
+                page.run_js("""
+                    let d = null;
+                    for (let d2 of document.querySelectorAll('.el-dialog')) {
+                        let t = (d2.querySelector('.el-dialog__title') || {}).textContent || '';
+                        if (t.trim() === '工艺管理') { d = d2; break; }
+                    }
+                    let bw = d.querySelector('.vxe-table--body-wrapper:last-child');
+                    if (!bw) return;
+                    let rows = bw.querySelectorAll('.vxe-body--row');
+                    let lastRow = rows[rows.length - 1];
+                    if (!lastRow) return;
+                    let plusIcon = lastRow.querySelector('.el-icon-plus, [class*=plus], .vxe-btn--add');
+                    if (!plusIcon) return;
+                    plusIcon.click();
+                """)
+                time.sleep(0.5)
             time.sleep(1)
-            log.info(f"  双击工序cell: {vxe_ok}")
 
-            # 在popover/select中选择工序
-            select_ok = page.run_js(f"""
-                // 找工序选择弹窗
-                let selectPanel = document.querySelector('.vxe-select--panel:not([style*=\"display: none\"])');
-                if (!selectPanel) return 'no_panel';
-                let items = selectPanel.querySelectorAll('.vxe-select-option, .el-select-dropdown__item, li, .vxe-cell--checkbox-option');
-                for (let item of items) {{
-                    let text = (item.textContent || '').trim();
-                    if (text === '{step_name}') {{
-                        item.click();
-                        return 'selected_' + text;
-                    }}
-                }}
-                return 'not_found';
-            """)
-            log.info(f"  选工序: {select_ok}")
-            time.sleep(0.5)
-        time.sleep(1)
+        # 2. 通过VXE数据对象直接设置每行
+        plan_json = json.dumps(process_plan, ensure_ascii=False)
+        code_map_json = json.dumps(ERP_CODE_MAP, ensure_ascii=False)
+        name_map_json = json.dumps(NAME_TO_ERP, ensure_ascii=False)
+
+        fill_result = page.run_js(f"""
+            let d = null;
+            for (let d2 of document.querySelectorAll('.el-dialog')) {{
+                let t = (d2.querySelector('.el-dialog__title') || {{}}).textContent || '';
+                if (t.trim() === '工艺管理') {{ d = d2; break; }}
+            }}
+            if (!d) return 'no_dialog';
+
+            let grid = d.querySelector('.vxe-grid');
+            if (!grid) return 'no_grid';
+            let vm = grid.__vue__;
+            if (!vm) return 'no_vm';
+
+            let steps = {plan_json};
+            let codeMap = {code_map_json};
+            let nameMap = {name_map_json};
+
+            let data = vm.getData();
+
+            for (let i = 0; i < steps.length && i < data.length; i++) {{
+                let name = steps[i].name;
+                let erpName = nameMap[name] || name;
+                let erpCode = codeMap[erpName] || '';
+
+                data[i].table_type = erpCode;
+                data[i].table_name = erpName;
+                data[i].machine = String(steps[i].machine_hours || 0);
+                data[i].plan_worker = steps[i].worker || '';
+                data[i].remark = steps[i].remark || '';
+            }}
+
+            return 'ok_d=' + data.length + '_s=' + steps.length;
+        """)
+        log.info(f"  填充结果: {fill_result}")
         log.info("VXE表格填充完成")
         return True
 
@@ -431,14 +352,9 @@ def _upload_drawing(page, drawing_local_path: Optional[str]) -> bool:
         time.sleep(2)
 
         # 在打开的附件tab中找文件上传控件
-        file_input = (
-            page.ele("tag:input@@type=file") or
-            page.ele("@name=file") or
-            page.ele("@accept=image") or
-            page.ele("@class*=upload")
-        )
-        if file_input:
-            file_input.input(drawing_local_path)
+        file_input = page.locator('input[type="file"], input[name="file"], [accept*="image"], [class*="upload"]').first
+        if file_input.count() > 0:
+            file_input.set_input_files(drawing_local_path)
             time.sleep(3)
             log.info("图纸上传成功（文件输入）")
             return True

@@ -15,7 +15,10 @@
       ↓ interrupt_after (人工审核 CNC 代码)
 
   Phase 3 (Online ERP):
-    erp_reconnect → fill_process_plan（含上传图纸）→ fill_routing_cnc → END
+    erp_reconnect → fill_process_plan（含上传图纸）→ END
+
+V3+ (fill_routing_cnc removed): CNC代码不再写入ERP，通过飞书机器人返回。
+  详见: scripts/fill_by_vision.py::format_cnc_for_remark()
 
 V3 核心变更：
   - process_reasoning / generate_cnc 两个节点合并为 supervisor_agent_run
@@ -76,7 +79,7 @@ def build_erp_graph(
 ) -> StateGraph:
     from workflows.erp_process.nodes import (
         node_login, node_detect_new_orders, node_fetch_drawing,
-        node_erp_reconnect, node_fill_plan, node_fill_routing,
+        node_erp_reconnect, node_fill_plan,
     )
 
     builder = StateGraph(ERPState)
@@ -92,7 +95,6 @@ def build_erp_graph(
     # Phase 3
     builder.add_node("erp_reconnect", node_erp_reconnect)
     builder.add_node("fill_process_plan", node_fill_plan)
-    builder.add_node("fill_routing_cnc", node_fill_routing)
 
     # Edges
     builder.add_edge(START, "login_erp")
@@ -107,8 +109,7 @@ def build_erp_graph(
     builder.add_edge("fetch_feishu_drawing", "supervisor_agent_run")
     builder.add_edge("supervisor_agent_run", "erp_reconnect")
     builder.add_edge("erp_reconnect", "fill_process_plan")
-    builder.add_edge("fill_process_plan", "fill_routing_cnc")
-    builder.add_edge("fill_routing_cnc", END)
+    builder.add_edge("fill_process_plan", END)
 
     # Compile
     if checkpointer is None:

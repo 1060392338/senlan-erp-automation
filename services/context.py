@@ -34,7 +34,7 @@ def _build_llm_client(tenant_config: dict, global_config: dict):
     return LLMClient(
         base_url=services_cfg.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
         api_key=api_key or None,
-        default_model=services_cfg.get("default_model", "qwen-max"),
+        default_model=services_cfg.get("default_model", "deepseek-v4-pro"),
         vision_model=services_cfg.get("vision_model", "qwen-vl-max"),
     )
 

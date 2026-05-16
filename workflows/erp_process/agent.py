@@ -259,21 +259,18 @@ def _format_result_summary(result: dict) -> str:
     cp = result.get("checkpoint", 0)
     prod_no = result.get("prod_no", "")
     plan_saved = result.get("plan_saved", False)
-    routing_saved = result.get("routing_saved", False)
 
     if cp == Checkpoint.DRAWING_FETCHED:
         return f"Phase 1 完成。生产单号: {prod_no}。请上传图纸或确认跳过视觉分析。"
 
     if cp == Checkpoint.CNC_GENERATED:
-        return "CNC 代码已生成，请人工审核。输入 '继续' 以回填 ERP。"
+        return "CNC 代码已生成，请人工审核。"
 
     parts = []
     if prod_no:
         parts.append(f"生产单号: {prod_no}")
     if plan_saved:
         parts.append("计划工艺已回填")
-    if routing_saved:
-        parts.append("CNC代码已回填")
     if not parts:
         parts.append("工作流执行完成")
 

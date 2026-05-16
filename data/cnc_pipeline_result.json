@@ -1,0 +1,149 @@
+{
+  "prod_no": "W20126051401",
+  "part_info": {
+    "name": "STRIPPER RING",
+    "material": "S-7",
+    "hardness": "54-56HRC",
+    "shape": "round",
+    "coating": "无",
+    "qty": 4
+  },
+  "features": [
+    {
+      "type": "外形",
+      "spec": "∅340×38.86mm"
+    },
+    {
+      "type": "精孔",
+      "spec": "∅2.0+0.01",
+      "roughness": 0.63,
+      "qty": 8
+    },
+    {
+      "type": "精孔",
+      "spec": "∅3.0+0.01",
+      "roughness": 0.63,
+      "qty": 4
+    },
+    {
+      "type": "精孔",
+      "spec": "∅1.5+0.01",
+      "roughness": 0.63,
+      "qty": 6
+    },
+    {
+      "type": "刻字",
+      "spec": ".35 high, radial depth .002-.003"
+    },
+    {
+      "type": "倒角",
+      "spec": "0.2×45°"
+    },
+    {
+      "type": "利角",
+      "note": "不许倒角"
+    }
+  ],
+  "cnc_code": {
+    "数控精车": "G90 G21 G40 G80\nG28 U0 W0\n( --- T0101 外形精车刀 --- )\nT0101\nG43 H01\nG96 S150 M03 ( 线速度 150m/min, 适用于 54-56HRC 材料 )\nG00 X350.0 Z50.0 M08 ( 安全接近 )\nG01 Z-38.86 F0.05 ( 外形精车 )\nG00 X350.0 Z50.0\n( --- T0202 钻孔刀 ∅2.0mm --- )\nG28 U0 W0\nT0202\nG43 H02\nG97 S1200 M03\nG00 X340.0 Z50.0 M08 ( 安全接近 )\nG01 Z-2.0 F0.02 ( 钻孔 ∅2.0mm )\nG00 Z50.0\n( 重复钻孔位置，共8个孔 )\n( --- T0303 钻孔刀 ∅3.0mm --- )\nG28 U0 W0\nT0303\nG43 H03\nG97 S1200 M03\nG00 X340.0 Z50.0 M08 ( 安全接近 )\nG01 Z-3.0 F0.02 ( 钻孔 ∅3.0mm )\nG00 Z50.0\n( 重复钻孔位置，共4个孔 )\n( --- T0404 钻孔刀 ∅1.5mm --- )\nG28 U0 W0\nT0404\nG43 H04\nG97 S1200 M03\nG00 X340.0 Z50.0 M08 ( 安全接近 )\nG01 Z-1.5 F0.02 ( 钻孔 ∅1.5mm )\nG00 Z50.0\n( 重复钻孔位置，共6个孔 )\n( --- T0505 刻字刀 --- )\nG28 U0 W0\nT0505\nG43 H05\nG97 S1200 M03\nG00 X340.0 Z50.0 M08 ( 安全接近 )\nG01 Z-0.05 F0.01 ( 刻字深度 0.002-.003\" )\nG00 Z50.0\n( 重复刻字位置 )\n( --- T0606 倒角刀 --- )\nG28 U0 W0\nT0606\nG43 H06\nG97 S1200 M03\nG00 X340.0 Z50.0 M08 ( 安全接近 )\nG01 X340.2 Z-0.2 F0.02 ( 倒角 0.2×45° )\nG00 X350.0 Z50.0\nG28 U0 W0\nM30",
+    "镜面放电": "### 放电参数表\n\n| 步骤 | 电流 (IP) | 脉冲宽度 (PW) | 电压 (VP) | 加工深度 (Z) | 备注 |\n|------|-----------|---------------|-----------|--------------|------|\n| 粗加工 | 5A        | 50us          | 90V       | -5.0mm       |      |\n| 半精加工 | 2A        | 20us          | 70V       | -5.1mm       |      |\n| 精加工 | 0.5A      | 5us           | 50V       | -5.15mm      | 镜面加工 |\n\n###G_CODE\n\n; SODICK AD32LS — STRIPPER RING EDM\n; Electrode: Cu-W alloy\n; Surface: Ra0.63\n;\nC000 (CONDITION SET)\nG90\nM80 (POWER ON)\n;\n\n; --- Step 1: Rough EDM ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X10.0 Y10.0\n;\n\n; --- Step 2: Semi-finish ---\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\n\n; --- Step 3: Finish ---\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- ∅2.0+0.01 (Ra0.63) ×8 ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X20.0 Y20.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- ∅3.0+0.01 (Ra0.63) ×4 ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X30.0 Y30.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- ∅1.5+0.01 (Ra0.63) ×6 ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X40.0 Y40.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- 刻字: .35 high, radial depth .002-.003 ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X50.0 Y50.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- 倒角: 0.2×45° ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X60.0 Y60.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\n; --- 利角 ---\nC001 (IP=5A, PW=50us, VP=90V)\nG01 Z-5.0 H001\nG01 X70.0 Y70.0\n;\nC002 (IP=2A, PW=20us, VP=70V)\nG01 Z-5.1 H001\n;\nC003 (IP=0.5A, PW=5us, VP=50V)\nG01 Z-5.15 H001\nM88 (MIRROR FINISH ON)\n;\n\nM02"
+  },
+  "quality": {
+    "self_reviews": [
+      {
+        "checks": [
+          {
+            "item": "安全高度",
+            "passed": true,
+            "detail": "所有G00前都有Z安全高度"
+          },
+          {
+            "item": "主轴转速",
+            "passed": true,
+            "detail": "S150（线速度）和S1200合理"
+          },
+          {
+            "item": "程序结尾",
+            "passed": true,
+            "detail": "有M30"
+          },
+          {
+            "item": "注释说明",
+            "passed": true,
+            "detail": "有基本注释"
+          },
+          {
+            "item": "语法基本正确",
+            "passed": true,
+            "detail": "G代码指令格式看起来正确"
+          }
+        ],
+        "summary": {
+          "passed": 5,
+          "failed": 0,
+          "total": 5
+        },
+        "overall": "pass",
+        "revision_advice": "整体合理，建议确认机床实际参数"
+      },
+      {
+        "checks": [
+          {
+            "item": "安全高度",
+            "passed": false,
+            "detail": "G01前没有指定Z安全高度"
+          },
+          {
+            "item": "主轴转速",
+            "passed": true,
+            "detail": "放电加工无需检查S值，此条不适用"
+          },
+          {
+            "item": "程序结尾",
+            "passed": true,
+            "detail": "以M02结束"
+          },
+          {
+            "item": "注释说明",
+            "passed": true,
+            "detail": "有基本的步骤和参数注释"
+          },
+          {
+            "item": "语法基本正确",
+            "passed": true,
+            "detail": "G代码格式看起来正确"
+          }
+        ],
+        "summary": {
+          "passed": 4,
+          "failed": 1,
+          "total": 5
+        },
+        "overall": "pass",
+        "revision_advice": "整体合理，但建议在每次G01移动之前增加一个安全高度指令（如G00 Z10.0）以确保刀具不会碰撞工件。"
+      }
+    ],
+    "cross_review": {
+      "vision_review": {
+        "passed": true,
+        "issues": [],
+        "feature_coverage": 0.85,
+        "corrections": {}
+      },
+      "cnc_review": {
+        "passed": true,
+        "issues": [
+          "在每次G01移动之前增加一个安全高度指令（如G00 Z10.0）以确保刀具不会碰撞工件"
+        ],
+        "safety_score": 80,
+        "overall_score": 75,
+        "corrections": {
+          "建议在每次G01移动之前增加一个安全高度指令（如G00 Z10.0）以确保刀具不会碰撞工件": "",
+          "建议确认机床实际参数": ""
+        }
+      },
+      "final_verdict": "approve",
+      "feedback_for_main_agent": "整体合理，有小改进空间但不影响使用"
+    }
+  }
+}

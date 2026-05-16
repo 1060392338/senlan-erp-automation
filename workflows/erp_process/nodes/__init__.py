@@ -1,8 +1,9 @@
-"""ERP 工艺工作流 V3 — 多Agent编排版
+"""ERP 工艺工作流 V3+ — 多Agent编排版
 
 节点（ERP交互层）：
   - login / detect_new_orders / drawing_fetch
-  - erp_reconnect / process_filler / routing_filler
+  - erp_reconnect / process_filler
+  - routing_filler (已废弃，保留导入兼容)
 
 Agent（AI推理层，由 supervisor_agent_run 节点调度）：
   - VisionAgent / CNCProgrammingAgent / ReviewAgent / SupervisorAgent

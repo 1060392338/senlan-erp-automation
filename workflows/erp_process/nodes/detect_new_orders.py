@@ -114,7 +114,7 @@ def node_detect_new_orders(
     new_orders = []
     try:
         page.wait.doc_loaded(timeout=5)
-        html = page.html
+        html = page.content()
 
         # 尝试多种方式提取生产单号和发送时间
         # 方式1: 从表格行中提取
@@ -138,11 +138,7 @@ def node_detect_new_orders(
                 continue
 
         # 方式2: 通过发送时间字段名查找
-        send_time_elem = (
-            page.ele("@name=发送时间") or
-            page.ele("@name=send_time") or
-            page.ele("@@text()=发送时间")
-        )
+        send_time_elem = page.locator('[name="发送时间"], [name="send_time"], text=发送时间').first
         if send_time_elem and not new_orders:
             log.info("找到发送时间字段，尝试获取相邻数据")
 

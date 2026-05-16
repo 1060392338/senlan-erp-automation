@@ -130,7 +130,7 @@ class CNCProgrammingAgent:
         if not messages:
             return self._fallback_turning(part_info, features)
 
-        response = self._llm.chat(messages, model="qwen-max")
+        response = self._llm.chat(messages, model="deepseek-v4-pro")
         return response or self._fallback_turning(part_info, features)
 
     def _generate_edm(
@@ -155,7 +155,7 @@ class CNCProgrammingAgent:
         if not messages:
             return self._fallback_edm(part_info, features)
 
-        response = self._llm.chat(messages, model="qwen-max")
+        response = self._llm.chat(messages, model="deepseek-v4-pro")
         return response or self._fallback_edm(part_info, features)
 
     def _self_review(self, code_segments: list, part_info: dict) -> dict:
@@ -181,7 +181,7 @@ class CNCProgrammingAgent:
         if not messages:
             return {"overall": "pass", "summary": {"passed": 5, "failed": 0, "total": 5}}
 
-        response = self._llm.chat(messages, model="qwen-max")
+        response = self._llm.chat(messages, model="deepseek-v4-pro")
         if response:
             try:
                 return self._parse_json(response) or {"overall": "pass", "summary": {"passed": 5, "failed": 0, "total": 5}}

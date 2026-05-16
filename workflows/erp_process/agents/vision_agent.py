@@ -9,6 +9,7 @@ import os
 import re
 from typing import Optional
 
+from config.dropdown_options import ERP_PROCESS_OPTIONS
 from services.prompt_service import PromptService
 
 log = logging.getLogger("agent.vision")
@@ -43,10 +44,16 @@ class VisionAgent:
             return self._fallback(prod_no)
 
         try:
-            # 渲染视觉 prompt（含 system + few_shot）
+            # 渲染视觉 prompt（含 system + few_shot + 可用选项）
             system_prompt = self._prompt.render("vision/system.j2")
             few_shot = self._prompt.render("vision/few_shot.j2")
-            user_prompt = self._prompt.render("vision/analyze.j2", few_shot=few_shot, prod_no=prod_no)
+            options_str = "\n".join(f"- {opt}" for opt in ERP_PROCESS_OPTIONS)
+            user_prompt = self._prompt.render(
+                "vision/analyze.j2",
+                few_shot=few_shot,
+                prod_no=prod_no,
+                available_options=options_str,
+            )
 
             if not user_prompt:
                 log.warning("提示词渲染为空")

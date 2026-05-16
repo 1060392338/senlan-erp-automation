@@ -158,8 +158,9 @@ class TestRoutingFillerNode:
         )
         config = _mock_config()
         result = node_fill_routing(state, config)
-        assert result["routing_saved"] is True
-        assert result["cnc_saved"] is True
+        # DEPRECATED: 不再写入ERP，返回 False
+        assert result["routing_saved"] is False
+        assert result["cnc_saved"] is False
 
     def test_fill_without_cnc(self):
         from workflows.erp_process.nodes.routing_filler import node_fill_routing

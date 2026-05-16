@@ -143,7 +143,6 @@ class TestBrowserService:
 
         svc = BrowserService(chrome_data="/tmp/test_chrome", port=9999)
         svc.close()  # 没有页面，不报错
-        svc.quit()  # 没有页面，不报错
 
 
 class TestLLMClient:

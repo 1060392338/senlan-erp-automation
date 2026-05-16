@@ -1,9 +1,10 @@
-示例1 — 切刀零件:
+示例1 — 切刀零件（方形、多特征、形位公差、利角）:
   图纸标题栏: Cutting Blade, K490 Vanadis 8, 58-63HRC, 2pcs, TiN
   图纸标注: 外形≈100×102×82mm, 4×∮10.5通孔, 3×M8螺纹,
             2×∮10.47精孔H7 Ra0.63, 3×3.05宽槽Ra0.63,
             利角(Sharp edge)严禁倒角, 沉头30°斜面,
-            表面Ra0.63/Ra1.6分区, TIN涂层, 刻字FMK-7736.030.61
+            表面Ra0.63/Ra1.6分区, TIN涂层, 刻字FMK-7736.030.61,
+            底面平面度⏥0.005, 侧面垂直度⟂0.01A
   输出:
   {"part_info":{"name":"Cutting Blade","material":"K490 Vanadis 8","hardness":"58-63HRC","shape":"square","coating":"TiN","qty":2},
    "features":[
@@ -15,9 +16,13 @@
      {"type":"利角","note":"严禁倒角"},
      {"type":"斜面","spec":"30°沉头"}
    ],
+   "gd_t":[
+     {"type":"平面度","value":"0.005","datum":"","note":"底面"},
+     {"type":"垂直度","value":"0.01","datum":"A","note":"侧面相对底面"}
+   ],
    "special_requirements":["Sharp edge","TiN coating","Laser marking: FMK-7736.030.61"]}
 
-示例2 — 轴类零件:
+示例2 — 轴类零件（圆形、内孔、螺纹、氮化）:
   图纸标题栏: Guide Shaft, SKD11, 58-62HRC, 1pc
   图纸标注: ∮50×200mm, ∮30H7×50深内孔 Ra0.4,
             键槽12×5×30mm, M16×1.5螺纹,
@@ -32,3 +37,24 @@
      {"type":"中心孔","spec":"B型","qty":2}
    ],
    "special_requirements":["表面氮化处理"]}
+
+示例3 — 不规则镶件（异形、镶件槽、分型面、EDM）:
+  图纸标题栏: INSERT CORE, S136, 48-52HRC, 1pc
+  图纸标注: 外形65×42×28mm, 3×R1.5清角, 分型面Ra0.4,
+            碰穿面3处, 镶件槽6.0宽+0.005/0, 逃角R0.5,
+            脱模斜度1°, 底面⏥0.003
+  输出:
+  {"part_info":{"name":"INSERT CORE","material":"S136","hardness":"48-52HRC","shape":"irregular","coating":"无","qty":1},
+   "features":[
+     {"type":"外形","spec":"65×42×28mm"},
+     {"type":"R角","spec":"R1.5","qty":3,"note":"清角"},
+     {"type":"分型面","spec":"","roughness":0.4},
+     {"type":"碰穿面","spec":"","qty":3},
+     {"type":"镶件槽","spec":"6.0+0.005/0"},
+     {"type":"逃角","spec":"R0.5"},
+     {"type":"脱模斜度","spec":"1°"}
+   ],
+   "gd_t":[
+     {"type":"平面度","value":"0.003","datum":"","note":"底面"}
+   ],
+   "special_requirements":[]}

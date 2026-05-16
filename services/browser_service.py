@@ -1,22 +1,74 @@
-"""
-BrowserService — 浏览器工厂
+"""BrowserService — Playwright 浏览器工厂（替代旧 DrissionPage 版）
 
 支持：
 - 单浏览器模式（默认，共享 Chrome 实例）
-- 多会话模式（不同用户用不同的 Chrome 实例 + 端口 + 数据目录）
+- 多会话模式（每个 run_id 独立 persistent_context + user_data_dir）
 """
 
-import subprocess
-import socket
 import logging
+import hashlib
+import os
+import time
 from pathlib import Path
 from typing import Optional
-from DrissionPage import ChromiumPage, ChromiumOptions
+
+from playwright.sync_api import sync_playwright, Page, BrowserContext
 
 log = logging.getLogger("browser_service")
 
+ERP_BASE = "http://112.74.35.30"
+
+
+def _patch_page(page):
+    """给 Playwright Page 注入 DrissionPage 兼容方法
+
+    让旧节点代码（process_filler.py / routing_filler.py）无需修改即可运行。
+    """
+    import types
+
+    # run_js(code) → evaluate() 支持 return 和箭头函数
+    def _run_js(self, code):
+        # 如果有 return 或包含 =>，包装成 IIFE
+        if 'return ' in code or '=>' in code:
+            code = f"(function() {{{code}}})()"
+        return self.evaluate(code)
+
+    # ele(selector) → locator 的第一匹配
+    def _ele(self, selector):
+        return self.locator(selector).first
+
+    # eles(selector) → 元素列表，每个有 .text 属性
+    def _eles(self, selector):
+        return self.locator(selector).all()
+
+    # url 和 title 用 Playwright 原生方法，不覆写
+    # DrissionPage 的 .html 用 .content() 替代
+    # 兼容用法: page.content() 即可
+
+    # wait.doc_loaded(timeout)
+    def _wait_doc_loaded(self, timeout=15):
+        self.wait_for_load_state("domcontentloaded", timeout=timeout * 1000)
+
+    # get(url) → goto
+    def _get(self, url):
+        self.goto(url, wait_until="domcontentloaded")
+
+    page.run_js = types.MethodType(_run_js, page)
+    page.ele = types.MethodType(_ele, page)
+    page.eles = types.MethodType(_eles, page)
+    page.get = types.MethodType(_get, page)
+    page.wait = types.SimpleNamespace()
+    page.wait.doc_loaded = types.MethodType(_wait_doc_loaded, page)
+
 
 class BrowserService:
+    """Playwright 浏览器工厂
+
+    兼容旧接口：
+    - get_page(session_id) → Page 对象
+    - close() 释放资源
+    """
+
     def __init__(
         self,
         chrome_data: str = "data/chrome_data",
@@ -25,91 +77,84 @@ class BrowserService:
         self._base_data = Path(chrome_data).expanduser().resolve()
         self._base_data.mkdir(parents=True, exist_ok=True)
         self._base_port = port
-        self._pages: dict[str, ChromiumPage] = {}
+        self._pw: Optional = None
+        self._context: Optional[BrowserContext] = None
+        self._page: Optional[Page] = None
+        self._pages: dict[str, Page] = {}
 
-    def get_page(self, session_id: Optional[str] = None) -> ChromiumPage:
+    def get_page(self, session_id: Optional[str] = None) -> Page:
+        """获取 Playwright Page（兼容旧接口返回 Page）
+
+        session_id 用于多会话隔离，首次创建后复用。
         """
-        获取浏览器页面。
+        if not session_id:
+            session_id = "default"
 
-        session_id=None: 共享实例（默认，现有行为不变）
-        session_id=xxx:  独立实例，每个 session_id 拥有自己的 Chrome + 数据目录
-                         不同用户传不同 session_id → 互不干扰
-        """
-        key = session_id or "__default__"
+        if session_id in self._pages:
+            return self._pages[session_id]
 
-        # 已有实例 → 复用
-        if key in self._pages:
-            try:
-                page = self._pages[key]
-                if page.tabs:
-                    return page.latest_tab
-            except Exception:
-                pass  # 实例已死，重新创建
+        # 首次创建该 session 的浏览器
+        if self._pw is None:
+            self._pw = sync_playwright().start()
 
-        chrome_dir = self._base_data / (session_id or "")
-        chrome_dir.mkdir(parents=True, exist_ok=True)
-        port = self._base_port if not session_id else self._find_free_port(start=self._base_port)
+        # 每个 session 用独立 user_data_dir
+        user_dir = str(self._base_data / f"playwright_{session_id}")
+        Path(user_dir).mkdir(parents=True, exist_ok=True)
 
-        # 先尝试连接已有 Chrome（同 session_id 的旧实例可能还活着）
-        if session_id:
-            try:
-                page = ChromiumPage(addr_or_opts=port)
-                if page.tabs_count > 1:
-                    page = page.latest_tab
-                self._pages[key] = page
-                return page
-            except Exception:
-                pass
+        try:
+            context = self._pw.chromium.launch_persistent_context(
+                user_data_dir=user_dir,
+                channel="chrome",
+                headless=False,
+                viewport={"width": 1920, "height": 1080},
+                locale="zh-CN",
+                timezone_id="Asia/Shanghai",
+            )
+        except Exception as e:
+            log.warning(f"创建 persistent_context 失败: {e}")
+            # fallback: 用普通 context
+            browser = self._pw.chromium.launch(
+                headless=False,
+                args=[
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-extensions",
+                ],
+            )
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                locale="zh-CN",
+                timezone_id="Asia/Shanghai",
+            )
 
-        # 启动新 Chrome
-        co = ChromiumOptions()
-        co.set_argument("--remote-debugging-port", str(port))
-        co.set_argument("--remote-allow-origins", "*")
-        co.set_argument("--no-first-run")
-        co.set_argument("--no-default-browser-check")
-        co.set_user_data_path(str(chrome_dir))
-        page = ChromiumPage(addr_or_opts=co)
-        self._pages[key] = page
-        log.info(f"启动新 Chrome: port={port}, data={chrome_dir.name}, key={key}")
+        page = context.pages[0] if context.pages else context.new_page()
+        # 注入 DrissionPage 兼容方法
+        _patch_page(page)
+        self._context = context
+        self._page = page
+        self._pages[session_id] = page
+        log.info(f"Playwright 浏览器已启动: session={session_id}")
         return page
 
     def close(self, session_id: Optional[str] = None):
-        """关闭指定会话或全部会话的浏览器实例"""
-        if session_id:
-            page = self._pages.pop(f"{session_id}", None)
-            if page:
-                try:
-                    page.quit()
-                except Exception:
-                    pass
-        else:
-            for key, page in list(self._pages.items()):
-                try:
-                    page.quit()
-                except Exception:
-                    pass
-            self._pages.clear()
+        """释放资源"""
+        if session_id and session_id in self._pages:
+            try:
+                self._pages[session_id].close()
+            except Exception:
+                pass
+            del self._pages[session_id]
+            return
 
-    def quit(self):
-        """关闭所有浏览器实例并清理"""
-        self.close(None)
-
-    def cleanup_locks(self, session_id: Optional[str] = None):
-        """清理 Chrome 锁文件"""
-        chrome_dir = self._base_data / (session_id or "")
-        subprocess.run(
-            ["rm", "-f",
-             str(chrome_dir / "SingletonLock"),
-             str(chrome_dir / "SingletonSocket"),
-             str(chrome_dir / "Default" / "LOCK")],
-            capture_output=True,
-        )
-
-    @staticmethod
-    def _find_free_port(start: int = 9300, max_tries: int = 100) -> int:
-        """找到可用端口"""
-        for port in range(start, start + max_tries):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(("127.0.0.1", port)) != 0:
-                    return port
-        return start
+        try:
+            if self._context:
+                self._context.close()
+        except Exception:
+            pass
+        try:
+            if self._pw:
+                self._pw.stop()
+        except Exception:
+            pass
+        self._pages.clear()
+        log.info("BrowserService 资源已释放")

@@ -127,17 +127,26 @@ class TestErpReconnectNode:
 class TestProcessFillerNode:
     def test_fill(self):
         from workflows.erp_process.nodes.process_filler import node_fill_plan
-        state = _make_state(
-            prod_no="PO-TEST-001",
-            process_plan=[{"seq": 1, "name": "铣床", "task": "开粗"}],
-        )
-        config = _mock_config()
-        result = node_fill_plan(state, config)
+        with (
+            patch("workflows.erp_process.nodes.process_filler._navigate_to_page", return_value=True),
+            patch("workflows.erp_process.nodes.process_filler._search_order", return_value=True),
+            patch("workflows.erp_process.nodes.process_filler._select_and_open_dialog", return_value=True),
+            patch("workflows.erp_process.nodes.process_filler._fill_vxe_table_cells", return_value=True),
+            patch("workflows.erp_process.nodes.process_filler._save_dialog", return_value=True),
+        ):
+            state = _make_state(
+                prod_no="PO-TEST-001",
+                process_plan=[{"seq": 1, "name": "铣床", "task": "开粗"}],
+            )
+            config = _mock_config()
+            result = node_fill_plan(state, config)
         assert result["plan_saved"] is True
 
     def test_fill_without_prod_no(self):
         from workflows.erp_process.nodes.process_filler import node_fill_plan
-        state = _make_state()
+        state = _make_state(
+            process_plan=[{"seq": 1, "name": "铣床", "task": "开粗"}],
+        )
         config = _mock_config()
         result = node_fill_plan(state, config)
         assert result["plan_saved"] is False

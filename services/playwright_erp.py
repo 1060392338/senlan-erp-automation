@@ -70,14 +70,14 @@ class PlaywrightERP:
         """检查登录态，需要则登录"""
         page = self._page
         page.goto(f"{ERP_BASE}/", timeout=15000)
-        time.sleep(4)
+        page.wait_for_load_state('networkidle', timeout=15000)
 
         if page.locator('input[name="username"]').count() > 0:
             log.info("需要登录...")
             page.fill('input[name="username"]', os.environ.get("ERP_473_USERNAME", "472"))
             page.fill('input[name="password"]', os.environ.get("ERP_473_PASSWORD", ""))
             page.click("span.login")
-            time.sleep(5)
+            page.wait_for_load_state('networkidle', timeout=10000)
             # 保存storage_state供后续使用
             self._context.storage_state(path="data/chrome_data/erp_auth.json")
             log.info("登录完成")
@@ -90,7 +90,7 @@ class PlaywrightERP:
         page = self._page
         page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
                   wait_until="domcontentloaded", timeout=15000)
-        time.sleep(5)
+        page.wait_for_load_state('networkidle', timeout=15000)
 
         # 如果还在登录页，补一次登录
         self.login_if_needed()
@@ -98,7 +98,7 @@ class PlaywrightERP:
         # 再次导航
         page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
                   wait_until="domcontentloaded", timeout=15000)
-        time.sleep(5)
+        page.wait_for_load_state('networkidle', timeout=15000)
 
         found = page.locator('input[placeholder="请输入生产单号"]').count() > 0
         log.info(f"到达计划工艺页面: {found}")
@@ -113,17 +113,16 @@ class PlaywrightERP:
                 tab_btn = page.locator(f"label:has(.el-radio-button__inner:text(\"{tab_name}\"))")
                 if tab_btn.count() > 0:
                     tab_btn.first.click()
-                    time.sleep(1)
+                    page.wait_for_timeout(300)
 
                 # 输入生产单号
                 inp = page.locator('input[placeholder="请输入生产单号"]')
                 if inp.count() > 0:
                     inp.fill(prod_no)
-                    time.sleep(0.3)
 
                 # 点击查询
                 page.locator('button:has-text("查询")').first.click()
-                time.sleep(3)
+                page.wait_for_load_state('networkidle', timeout=10000)
 
                 # 检查是否找到
                 if page.locator(f"text={prod_no}").count() > 0:
@@ -155,7 +154,7 @@ class PlaywrightERP:
                 return 'clicked';
             }
         """)
-        time.sleep(6)
+        page.wait_for_selector('.el-dialog', timeout=10000)
 
         # 验证弹窗
         check = page.evaluate("""
@@ -194,7 +193,7 @@ class PlaywrightERP:
                 }
             }
         """)
-        time.sleep(1)
+        page.wait_for_timeout(300)
 
         # 2. 用VXE insert插入带数据的行
         result = page.evaluate(f"""
@@ -228,13 +227,13 @@ class PlaywrightERP:
                 return 'vxe_insert_' + rows.length + '_tableData_' + final;
             }}
         """)
-        time.sleep(2)
+        page.wait_for_timeout(300)
         log.info(f"  插入行: {result}")
 
         final_rows = page.locator(".vxe-body--row").count()
         log.info(f"  DOM行数: {final_rows}")
 
-        time.sleep(1)
+        page.wait_for_timeout(300)
         log.info("工序填充完成")
 
     def save_dialog(self):
@@ -250,7 +249,7 @@ class PlaywrightERP:
 
         save_btn.click(force=True, timeout=5000)
         log.info("保存: 按钮已点击，等待确认...")
-        time.sleep(2)
+        page.wait_for_load_state('networkidle', timeout=10000)
 
         for _ in range(10):
             toast = page.evaluate("""() => {
@@ -260,7 +259,7 @@ class PlaywrightERP:
             if toast:
                 log.info(f"保存: ✓ {toast}")
                 return True
-            time.sleep(1)
+            page.wait_for_timeout(300)
 
         log.warning("保存: 未检测到成功提示")
         return False

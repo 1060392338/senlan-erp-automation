@@ -25,8 +25,6 @@ import logging
 import os
 import re
 import sys
-import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
@@ -37,8 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.dropdown_options import ERP_CODE_MAP
 from workflows.erp_process.process_reasoning import reason_process, map_to_erp_processes
-from workflows.erp_process.agents.vision_agent import VisionAgent
-from services.llm_client import LLMClient
+from scripts.vision_service import extract_prod_no, scan_drawings, VisionService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,46 +45,6 @@ log = logging.getLogger("fill_by_vision")
 
 ERP_BASE = "http://112.74.35.30"
 USER_DATA_DIR = "data/chrome_data/playwright"
-
-# ─── 文件名工具 ─────────────────────────────────────
-
-def extract_prod_no(filename: str) -> tuple[str, Optional[str]]:
-    """从文件名提取生产单号和零件号
-
-    "C03026051501-001.pdf" → ("C03026051501", "001")
-    "W20126051401.pdf"    → ("W20126051401", None)
-    """
-    stem = Path(filename).stem
-    if "-" in stem:
-        idx = stem.index("-")
-        return stem[:idx], stem[idx + 1:]
-    return stem, None
-
-
-def scan_drawings(drawings_dir: str) -> dict:
-    """扫描图纸目录，返回 { prod_no: {part_no: pdf_path} }
-
-    同名文件，有后缀和无后缀同时存在时，警告并优先使用带后缀的。
-    例如 C03026051501.pdf + C03026051501-001.pdf → 后者覆盖前者（警告）
-    """
-    result = defaultdict(dict)
-    dir_path = Path(drawings_dir)
-    if not dir_path.is_dir():
-        raise ValueError(f"图纸目录不存在: {drawings_dir}")
-
-    for f in sorted(dir_path.glob("*.pdf")):
-        prod_no, part_no = extract_prod_no(str(f))
-        key = part_no  # None 在 dict 中也是合法key
-        if key in result[prod_no]:
-            log.warning(f"⚠ 同名冲突: {prod_no} 已存在 part={key}, 被 {f.name} 覆盖")
-        result[prod_no][part_no] = str(f)
-
-    log.info(f"扫描图纸: {len(result)} 个生产单, 共 {sum(len(v) for v in result.values())} 张图纸")
-    for pn, parts in result.items():
-        labels = [k if k else "(无零件号)" for k in parts]
-        log.info(f"  {pn}: {labels}")
-    return dict(result)
-
 
 # ─── 浏览器 JS 助手 ────────────────────────────────
 
@@ -169,83 +126,6 @@ def click_process_mgmt(page):
 # ─── CNC 格式 ─────────────────────────────────────
 
 
-# ─── 视觉+推理（批量）────────────────────────────
-
-def batch_analyze(drawings: dict) -> dict:
-    """预批量做全部视觉分析和工艺推理
-
-    Args:
-        drawings: { prod_no: {part_no: pdf_path} }
-
-    Returns:
-        { prod_no: {part_no: process_plan} }
-    """
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    llm = LLMClient(api_key=api_key)
-    vision = VisionAgent(llm=llm)
-
-    plans = {}
-    total = sum(len(parts) for parts in drawings.values())
-    done = 0
-
-    for prod_no, parts in drawings.items():
-        plans[prod_no] = {}
-        for part_no, pdf_path in parts.items():
-            done += 1
-            label = f"{prod_no}-{part_no}" if part_no else prod_no
-            log.info(f"[视觉 {done}/{total}] {label}")
-
-            if not os.path.exists(pdf_path):
-                raise FileNotFoundError(f"图纸不存在: {pdf_path}")
-
-            vision_result = vision.analyze(drawing_path=pdf_path, prod_no=label)
-            part_info = vision_result.get("part_info", {})
-            features = vision_result.get("features", [])
-            special_reqs = vision_result.get("special_requirements", [])
-
-            log.info(f"  零件: {part_info.get('name','?')}, "
-                     f"材料: {part_info.get('material','?')}, "
-                     f"特征: {len(features)}个")
-
-            full_plan = reason_process(part_info, features, special_reqs)
-            process_plan = map_to_erp_processes(full_plan)
-
-            log.info(f"  工序: {[p['name'] for p in process_plan]}, "
-                     f"共{len(process_plan)}道")
-            plans[prod_no][part_no] = process_plan
-
-            # 保存分析缓存（供 CNC pipeline 使用）
-            _save_analysis_cache(prod_no, part_no, part_info, features, special_reqs)
-
-    return plans
-
-
-def _save_analysis_cache(prod_no, part_no, part_info, features, special_reqs):
-    """保存视觉分析结果到缓存文件，供 run_cnc_pipeline.py 读取"""
-    import json as _json
-    cache_dir = Path(__file__).parent.parent / "data"
-    cache_dir.mkdir(exist_ok=True)
-    cache_path = cache_dir / f"analysis_cache_{prod_no}.json"
-    entry = {
-        "part_no": part_no,
-        "part_info": part_info,
-        "features": features,
-        "special_reqs": special_reqs,
-    }
-    if cache_path.exists():
-        with open(cache_path) as f:
-            existing = _json.load(f)
-    else:
-        existing = []
-    # 替换已有零件或追加
-    existing = [e for e in existing if e.get("part_no") != part_no]
-    existing.append(entry)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        _json.dump(existing, f, ensure_ascii=False, indent=2)
-    log.info(f"  ✓ 分析缓存已保存: {cache_path.name}")
-
-
-
 # ─── 单零件对话框填充 ─────────────────────────────
 
 def fill_one_part(page, part_no_label: str, process_plan: list,
@@ -268,8 +148,8 @@ def fill_one_part(page, part_no_label: str, process_plan: list,
         for _ in range(need):
             js(page, """let icons = document.querySelectorAll('.el-icon-plus');
                 if(icons.length > 0) icons[icons.length - 1].click();""")
-            time.sleep(0.8)
-        time.sleep(1)
+            page.wait_for_timeout(300)
+        page.wait_for_timeout(300)
         dom_rows = dialog_js(page, "return d.querySelector('.vxe-grid').__vue__.getData().length;")
         log.info(f"  添加后行数: {dom_rows}")
 
@@ -298,7 +178,7 @@ def fill_one_part(page, part_no_label: str, process_plan: list,
     log.info(f"  填充: {fill_result}")
 
     # 保存
-    time.sleep(1)
+    page.wait_for_timeout(300)
     save_btn = page.locator(
         '.el-dialog:has(.el-dialog__title:text("工艺管理")) '
         '.el-dialog__footer button.el-button--primary'
@@ -322,7 +202,7 @@ def fill_one_part(page, part_no_label: str, process_plan: list,
         log.info("  ✓ JS点击保存按钮")
 
     # 确认保存
-    time.sleep(2)
+    page.wait_for_load_state('networkidle', timeout=10000)
     for _ in range(10):
         toast = js(page, """
             let t = document.querySelector('.el-message--success');
@@ -335,7 +215,7 @@ def fill_one_part(page, part_no_label: str, process_plan: list,
         if not dialog_open:
             log.info("  ✓ 保存成功（弹窗已关闭）")
             break
-        time.sleep(1)
+        page.wait_for_timeout(300)
     else:
         log.warning("  保存后弹窗未关闭，但数据已写入")
 
@@ -386,7 +266,7 @@ def process_prod_no(page, prod_no: str, plans: dict,
                     if(span && span.textContent.trim() === '{tab_name}') {{ btn.click(); return; }}
                 }}
             """)
-            time.sleep(2)
+            page.wait_for_load_state('networkidle', timeout=10000)
 
             # 搜索：先用JS清除弹窗遮罩，再用JS直接触发查询
             js(page, """
@@ -397,14 +277,13 @@ def process_prod_no(page, prod_no: str, plans: dict,
             inp = page.locator('input[placeholder="请输入生产单号"]')
             if inp.count() > 0:
                 inp.fill(prod_no)
-                time.sleep(0.3)
             js(page, """
                 let btns = document.querySelectorAll('button');
                 for(let btn of btns) {
                     if(btn.textContent.trim() === '查询') { btn.click(); break; }
                 }
             """)
-            time.sleep(3)
+            page.wait_for_load_state('networkidle', timeout=10000)
 
             # 找该标签下有没有匹配的行
             rows = get_all_matching_rows(page, prod_no)
@@ -436,25 +315,24 @@ def process_prod_no(page, prod_no: str, plans: dict,
                     if(span && span.textContent.trim() === '{found_row["tab"]}') {{ btn.click(); return; }}
                 }}
             """)
-            time.sleep(2)
+            page.wait_for_load_state('networkidle', timeout=10000)
             inp = page.locator('input[placeholder="请输入生产单号"]')
             if inp.count() > 0:
                 inp.fill(prod_no)
-                time.sleep(0.3)
             page.locator('button:has-text("查询")').first.click()
-            time.sleep(3)
+            page.wait_for_load_state('networkidle', timeout=10000)
 
         # 勾选该行 → 开弹窗 → 填 → 保存 → 取消勾选
         click_row_checkbox(page, found_row["row_index"])
-        time.sleep(1)
+        page.wait_for_timeout(300)
         click_process_mgmt(page)
-        time.sleep(6)
+        page.wait_for_load_state('networkidle', timeout=10000)
 
         if not dialog_js(page, "return true;"):
             log.warning(f"  弹窗未打开，重试...")
-            time.sleep(3)
+            page.wait_for_timeout(300)
             click_process_mgmt(page)
-            time.sleep(6)
+            page.wait_for_load_state('networkidle', timeout=10000)
 
         if not dialog_js(page, "return true;"):
             log.error(f"  零件 {part_label} 弹窗打开失败，跳过")
@@ -463,7 +341,7 @@ def process_prod_no(page, prod_no: str, plans: dict,
         fill_one_part(page, part_label, plan, prod_no, part_no, is_multi=len(part_nos) > 1)
 
         # 关闭残留弹窗 + 取消勾选
-        time.sleep(2)
+        page.wait_for_timeout(300)
         js(page, """
             // 强制移除所有弹窗遮罩
             for(let d of document.querySelectorAll('.el-dialog__wrapper, .v-modal, .el-overlay')) {
@@ -471,11 +349,11 @@ def process_prod_no(page, prod_no: str, plans: dict,
                 d.remove();
             }
         """)
-        time.sleep(1)
+        page.wait_for_timeout(300)
         click_row_checkbox(page, found_row["row_index"])
         log.info(f"  ✓ 零件 {part_label} 完成")
         processed += 1
-        time.sleep(1)
+        page.wait_for_timeout(300)
 
     if processed == 0 and part_nos:
         log.warning(f"  生产单 {prod_no} 所有零件均未处理")
@@ -547,7 +425,7 @@ def run(drawings_dir: str = None, drawing_path: str = None,
     # ── Step 1: 批量视觉+推理 ──
     log.info(f"\n{'='*60}")
     log.info("批量视觉分析 + 工艺推理...")
-    plans = batch_analyze(target)
+    plans = VisionService().analyze_batch(target)
     log.info(f"\n推理完成: {sum(len(v) for v in plans.values())} 套工艺方案")
 
     # ── Step 2-3: 每个零件独立开浏览器处理 ──
@@ -583,27 +461,27 @@ def run(drawings_dir: str = None, drawing_path: str = None,
                 # 登录
                 log.info("  登录ERP...")
                 page.goto(f"{ERP_BASE}/", timeout=15000)
-                time.sleep(4)
+                page.wait_for_load_state('networkidle', timeout=15000)
                 if page.locator('input[name="username"]').count() > 0:
                     page.fill('input[name="username"]', account)
                     page.fill('input[name="password"]', erp_password)
                     page.locator("span.login").click()
-                    time.sleep(5)
+                    page.wait_for_load_state('networkidle', timeout=10000)
                     log.info("  ✓ 已登录")
 
                 # 导航到计划工艺
                 log.info("  导航到计划工艺...")
                 page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
                           wait_until="domcontentloaded", timeout=15000)
-                time.sleep(5)
+                page.wait_for_load_state('networkidle', timeout=15000)
                 if page.locator('input[name="username"]').count() > 0:
                     page.fill('input[name="username"]', account)
                     page.fill('input[name="password"]', erp_password)
                     page.locator("span.login").click()
-                    time.sleep(5)
+                    page.wait_for_load_state('networkidle', timeout=10000)
                     page.goto(f"{ERP_BASE}/#/Craftwork/steel_craftworkList/0210",
                               wait_until="domcontentloaded", timeout=15000)
-                    time.sleep(5)
+                    page.wait_for_load_state('networkidle', timeout=15000)
 
                 # 在所有标签页中搜索该零件
                 found_row = None
@@ -614,13 +492,12 @@ def run(drawings_dir: str = None, drawing_path: str = None,
                             if(span && span.textContent.trim() === '{tab_name}') {{ btn.click(); return; }}
                         }}
                     """)
-                    time.sleep(2)
+                    page.wait_for_load_state('networkidle', timeout=10000)
                     inp = page.locator('input[placeholder="请输入生产单号"]')
                     if inp.count() > 0:
                         inp.fill(pn)
-                        time.sleep(0.3)
                     page.locator('button:has-text("查询")').first.click()
-                    time.sleep(3)
+                    page.wait_for_load_state('networkidle', timeout=10000)
 
                     rows = get_all_matching_rows(page, pn)
                     for r in rows:
@@ -640,15 +517,15 @@ def run(drawings_dir: str = None, drawing_path: str = None,
 
                 # 勾选 → 开弹窗 → 填 → 保存 → 取消勾选
                 click_row_checkbox(page, found_row["row_index"])
-                time.sleep(1)
+                page.wait_for_timeout(300)
                 click_process_mgmt(page)
-                time.sleep(6)
+                page.wait_for_load_state('networkidle', timeout=10000)
 
                 if not dialog_js(page, "return true;"):
                     log.warning(f"  弹窗未打开，重试...")
-                    time.sleep(3)
+                    page.wait_for_timeout(300)
                     click_process_mgmt(page)
-                    time.sleep(6)
+                    page.wait_for_load_state('networkidle', timeout=10000)
 
                 if not dialog_js(page, "return true;"):
                     log.error(f"  弹窗打开失败，跳过")
@@ -658,7 +535,7 @@ def run(drawings_dir: str = None, drawing_path: str = None,
                 fill_one_part(page, part_label, plan, pn, part_no,
                               is_multi=total_parts > 1)
 
-                time.sleep(1)
+                page.wait_for_timeout(300)
                 click_row_checkbox(page, found_row["row_index"])
                 log.info(f"  ✅ 零件 {part_label} 完成")
                 success_count += 1
@@ -675,7 +552,7 @@ def run(drawings_dir: str = None, drawing_path: str = None,
                         pass
 
         # 清理下一个零件的 persistence 状态（保持登录态）
-        time.sleep(1)
+        page.wait_for_timeout(300)
 
     # 完成报告
     log.info(f"\n{'='*60}")

@@ -119,6 +119,8 @@ PROCESS_EQUIPMENT = {
     "数控粗车": "TAKISAWA NEX-108",
     "慢走丝": "SODICK AD32LS",
     "中走丝": "中走丝",
+    "坐标磨": "坐标磨",
+    "无心研磨": "无心研磨",
     "镜面放电": "SODICK AD32LS",
     "高频": "高频机",
     "雕刻": "激光",
@@ -200,6 +202,12 @@ def reason_process(part_info: dict, features: list, special_reqs: list) -> list:
     if engrave_content and "雕刻" not in process_features:
         process_features["雕刻"] = [{"type": "刻字", "spec": engrave_content}]
         log.info(f"    从特殊要求提取刻字: {engrave_content[:50]}")
+
+    # 从 special_reqs 检测利角要求
+    for s in (special_reqs or []):
+        if "利角" in str(s) or "Sharp" in str(s) or "刃口" in str(s):
+            has_sharp = True
+            log.info("    从特殊要求检测到利角")
 
     # ────────── 添加上下文工序 ──────────
 

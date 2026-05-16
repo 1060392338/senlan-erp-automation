@@ -9,11 +9,24 @@ venv/
 # 项目数据
 data/chrome_data/
 data/chrome_*/
+data/chat_history/
 data/vector_index/
 data/states/
+data/analysis_cache_*.json
+data/cnc_pipeline_result.json
+data/last_vision_output.json
+data/dialog_*.png
+data/drawing_*.pdf
+data/drawing_*.png
+# 保留测试图纸单文件（明确标记用途的可保留）
+# data/C030*.pdf
+# data/W201*.pdf
 output/
 logs/
 *.db
+*.db-shm
+*.db-wal
+*.sqlite
 *.log
 
 # IDE

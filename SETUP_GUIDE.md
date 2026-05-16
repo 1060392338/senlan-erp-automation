@@ -65,25 +65,21 @@ ERP_472_PASSWORD=123456
 
 **.env 是敏感文件，不要提交到 Git**（已在 `.gitignore` 中排除）。
 
-## 5. 启动 Chrome
+## 5. 首次登录（浏览器持久化）
 
 CNC 编程流水线（`run_cnc_pipeline.py`）不需要浏览器。
-但 ERP 流程（`fill_by_vision.py`）需要带 CDP 端口的 Chrome。
+但 ERP 流程（`fill_by_vision.py`）需要浏览器。Playwright 会自动启动 Chrome，无需手动开 CDP：
 
 ```bash
-# 启动 Chrome 持久化实例（端口 9222）
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-    --remote-debugging-port=9222 \
-    --remote-allow-origins=* \
-    --user-data-dir="$HOME/.hermes/senlan-automation/data/chrome_data/playwright" \
-    --disable-extensions \
-    --window-size=1920,1080 &
+# Playwright 自动管理 Chrome 实例（通过 launch_persistent_context）
+# 首次运行需要手动登录一次以持久化登录态
+cd ~/.hermes/senlan-automation
+python3 scripts/fill_by_vision.py --drawings-dir /path/to/drawings --account 472
 ```
 
-首次启动需要手动登录 ERP（http://112.74.35.30），账号 472 / 密码 123456。
-登录成功后浏览器保持打开，后续自动化复用登录态。
+首次运行会弹出 Chrome 窗口，手动访问 `http://112.74.35.30`，账号 472 / 密码 123456 登录。登录后关掉浏览器，Playwright 会将登录态保存到 `data/chrome_data/playwright/`，后续自动复用。
 
-> **注意**: `--remote-debugging-port=9222` 和 `--remote-allow-origins=*` 必须同时带，否则 CDP WebSocket 返回 403。
+> 首次运行也可以纯手动先登录：直接打开 Chrome，访问 ERP 登录一次，Playwright 即会自动识取持久化目录中的登录态。
 
 ## 6. 快速验证
 

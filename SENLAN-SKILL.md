@@ -338,7 +338,7 @@ for (let row of document.querySelectorAll('.vxe-body--row')) {
 ### 浏览器会话管理约束
 
 1. **Playwright** — 唯一浏览器方案。`persistent_context` 保持登录态（`user_data_dir=data/chrome_data/playwright/`），每个账号不同端口。
-2. **持久化** — `set_user_data_path()` 代替 cookie 手动持久化。Chrome 端口 9222（CDP 模式），必须加 `--remote-allow-origins=*` 否则 CDP WebSocket 返回 403。
+2. **持久化** — Playwright 的 `launch_persistent_context(channel="chrome")` 自动管理登录态，目录 `data/chrome_data/playwright/`。首次运行弹窗手动登录一次，后续自动复用。无需手动启动 CDP 端口。
 3. **登录验证** — 首次登录可能需要短信验证码。`.env` 文件注入 `ERP_{account}_PASSWORD`。
 4. **`page` 生命周期** — `page = context.new_page()` 在 try 块内创建，finally 块外不要引用。必须加 `if page:` 守卫，否则 `page.wait_for_timeout()` 在浏览器已关闭后崩溃（EventLoopClosedError）。
 5. **Test 隔离** — 单元测试用 MagicMock 模拟 Playwright 交互。MagicMock 不抛异常，需 `isinstance` 守卫区分 mock 与真实对象。集成测试依赖 ERP + Chrome，CI 跳过。

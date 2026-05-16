@@ -443,16 +443,24 @@ send_message(target=target, message=message)
 | CNC审查过严 | 已降标 5 项宽松检查 |
 | 搜索不到订单 | 遍历未发送→BOM清单→已发送 |
 
-## 代码审查 — V5.6 已知缺陷与改进计划
+## 代码审查 — V5.6 改进记录与待办
 
-> 以下问题来源于2026-05-16全流程代码审查。按优先级标注。
+> 2026-05-16 全流程代码审查 + 修复，6项已合入。
 
-### 🔴 必须修复（合入前解决）
+### ✅ V5.6 已修复（本会话完成）
 
-1. **飞书 Secret 硬编码** — `scripts/fill_by_vision.py` L740-742 明文写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。移入 `.env`。
-2. **飞书通知 400 错误** — `_send_feishu_notification()` 每次调用返回 HTTP 400。token/user_id 过期或 content JSON 转义异常。改用 `send_message` 工具或检查飞书凭证。
-3. **两步脚本人工衔接** — 用户跑完 `fill_by_vision.py` 还要手动跑 `run_cnc_pipeline.py`。`fill_by_vision.py` 成功填完 ERP 后应自动调用 CNC 管道。
-4. **死代码 `format_cnc_for_remark()`** — 已被 `run_cnc_pipeline.py` 取代，删除 `--gen-cnc` 参数和该函数。
+| # | 问题 | 修复方式 |
+|---|------|---------|
+| 1 | **飞书 Secret 硬编码** — 源码明文写 APP_ID/APP_SECRET | 移入 `.env`，`os.environ.get()` 读取 |
+| 2 | **两步脚本人工衔接** — 填ERP后需手动跑CNC | `fill_by_vision.py:run()` 末尾自动调 `run_cnc_pipeline.run()` |
+| 3 | **死代码 `format_cnc_for_remark()`** — 被run_cnc_pipeline.py取代 | 整函数删除，`--gen-cnc` CLI参数删除 |
+| 4 | **fallback 假坐标** — `G00 X342.0 Z2.0` 是旧零件尺寸 | 全部改为 `(TBD: ???)` 标记 |
+| 5 | **fallback 字符串拼接 bug** — `if part_info else ""` 只控后半段 | 用 `_pn/_mat/_hdr` 预处理变量，去掉条件拼接 |
+| 6 | **MEMORY.md 版本号** — 标 V5.5 实为 V5.6 | 更新为 V5.6 |
+
+### 🔴 仍未解决（待修复）
+
+1. **飞书通知 400 错误** — `_send_feishu_notification()` 每次返回 HTTP 400。token/user_id 可能过期。用户已表示暂不管。
 
 ### 🟡 建议修改（本次或下次迭代）
 

@@ -283,6 +283,14 @@ for (let row of document.querySelectorAll('.vxe-body--row')) {
    - **策略 C（应急）**：用 `page.evaluate()` 直接 JS 触发 click 替代 Playwright Locator.click()。适用于不需要 Playwright 原生等待的场景（如点击查询按钮）。
 4. **可靠判断**：如果策略 B/C 仍失败，立即切换策略 A。不要在失败策略上循环。
 
+### 浏览器会话管理约束
+
+1. **Playwright** — 唯一浏览器方案。`persistent_context` 保持登录态（`user_data_dir=data/chrome_data/playwright/`），每个账号不同端口。
+2. **持久化** — `set_user_data_path()` 代替 cookie 手动持久化。Chrome 端口 9222（CDP 模式），必须加 `--remote-allow-origins=*` 否则 CDP WebSocket 返回 403。
+3. **登录验证** — 首次登录可能需要短信验证码。`.env` 文件注入 `ERP_{account}_PASSWORD`。
+4. **`page` 生命周期** — `page = context.new_page()` 在 try 块内创建，finally 块外不要引用。必须加 `if page:` 守卫，否则 `page.wait_for_timeout()` 在浏览器已关闭后崩溃（EventLoopClosedError）。
+5. **Test 隔离** — 单元测试用 MagicMock 模拟 Playwright 交互。MagicMock 不抛异常，需 `isinstance` 守卫区分 mock 与真实对象。集成测试依赖 ERP + Chrome，CI 跳过。
+
 ## 通用模式：AI 视觉输出类型安全
 
 阿里百炼/DeepSeek 视觉分析返回的字段可能是任意类型，不能假设为 int/str：
@@ -464,7 +472,10 @@ send_message(target=target, message=message)
 | 搜索不到订单 | 遍历未发送→BOM清单→已发送 |
 | `wait_for_load_state( networkidle )` 永不返回 | ERP是SPA系统持续轮询，networkidle永远不会触发。用 `goto(timeout=30000)` + `wait_for_timeout(3000-5000)` |
 | `page` 变量在 try 外被引用 | `page = context.new_page()` 在try块内，finally块外 `page.wait_for_timeout()` 报NameError或EventLoopClosed。page访问要加 `if page:` 守卫 |
-| 利角仅写special_reqs不被检测 | `has_sharp` 只检查features不检查special_reqs。补上 `for s in special_reqs: if 利角 in s: has_sharp=True` |
+|| 利角仅写special_reqs不被检测 | `has_sharp` 只检查features不检查special_reqs。补上 `for s in special_reqs: if 利角 in s: has_sharp=True` |
+|| DeepSeek API "假超时" | HTTP 200 头瞬间返回但响应体要 110-180s 才下载完。不是代码bug。后台模式（`notify_on_complete` / `subprocess.Popen`）不限时等待 |
+|| `ThreadPoolExecutor` + `LLMClient` 线程安全 | OpenAI httpx 客户端并发请求是线程安全的，不需要每线程新建 client。用共享单例即可 |
+|| 并行调试过渡方法 | 先改为串行定位问题 → 确认逻辑正确 → 恢复并行。不要在并行代码中同时引入新逻辑 |
 
 ## 代码审查 — V5.6 改进记录与待办
 

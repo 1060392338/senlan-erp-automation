@@ -98,9 +98,24 @@ python3 scripts/fill_by_vision.py \
     --account 472
 ```
 
-### Step 5 — CNC 代码返回飞书
-- CNC 编程结果（G代码）通过飞书 API 发送到用户私聊
-- 消息包含：生产单号+零件号、工序名称、G代码（Markdown代码块）、注意事项
+### Step 5 — CNC 代码全量返回飞书（必须）
+
+流程完成后，CNC 代码必须**全量返回**到用户飞书私聊，不是只发摘要/通知。
+
+**发送内容**（每项都是完整的，不能省略G代码正文）：
+- 生产单号 + 零件号标识
+- 工序名称：**数控精车**（TAKISAWA NEX-108）
+  - G代码正文（Markdown 代码块，完整可复制上机）
+  - 刀具/转速/进给参数说明
+- 工序名称：**镜面放电**（SODICK AD32LS）
+  - G代码正文（Markdown 代码块，完整可复制上机）
+  - 电参数/电极说明
+- 质量报告摘要（自审通过/交叉审查 verdict）
+
+**实现方式**：
+- 运行完 `fill_by_vision.py` 后，读取 `data/cnc_pipeline_result.json`
+- 用飞书 API 发送两段完整 G代码（`POST /open-apis/im/v1/messages`，msg_type=text）
+- 不要只发文件路径或 JSON 摘要，用户要的是**直接能看的 G 代码**
 
 ## 双执行环境
 

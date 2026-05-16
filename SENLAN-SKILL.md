@@ -84,7 +84,7 @@ CNC 编程流水线（`run_cnc_pipeline.py`）每次执行耗时长（单零件 
 用户提供：
 - **阿里百炼 API Key**（视觉分析，qwen3.6-plus）
 - **DeepSeek / 大模型 API Key**（工艺推理、CNC编程）
-- **ERP 系统账号密码**（`ERP_{account}_PASSWORD`，默认账号 472）
+- **ERP 账号密码**（`ERP_{account}_PASSWORD`，默认账号 472）
 
 配置方式：写入 `.env` 文件（路径 `~/.hermes/senlan-automation/.env`）
 
@@ -97,7 +97,7 @@ DASHSCOPE_API_KEY=***
 DEEPSEEK_API_KEY=***
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
-# ERP 系统密码（账号由 --account 传入，默认 472）
+# ERP 账号密码（账号由 --account 传入，默认 472）
 ERP_472_PASSWORD=***
 # 多账号：ERP_473_PASSWORD=***
 ```
@@ -219,7 +219,7 @@ DASHSCOPE_API_KEY=***
 DEEPSEEK_API_KEY=***
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1   # 可选，默认值
 
-# === ERP 系统密码（账号由 --account 传入）===
+# ERP 账号密码（账号由 --account 传入，默认 472）
 ERP_472_PASSWORD=***
 # 多账号：ERP_473_PASSWORD=***
 

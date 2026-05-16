@@ -2,10 +2,16 @@
 """CNC编程Agent流水线：编程→自审→交叉审查→合成→返回飞书
 
 用法：
-    cd ~/.hermes/senlan-automation
-    DASHSCOPE_API_KEY="sk-xxx" python3 scripts/run_cnc_pipeline.py
+    # 从分析结果文件加载（由 fill_by_vision.py 生成）
+    python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
+
+    # 直接传入零件信息+特征
+    python3 scripts/run_cnc_pipeline.py \
+        --part-info-json '{"name":"前模镶件","material":"STAVAX ESR","hardness":"HRC48-50","shape":"round","coating":"无","qty":1}' \
+        --features-json '[{"type":"外形","spec":"107×30mm"},{"type":"打孔","spec":"M4×1","qty":4}]' \
+        --special-reqs-json '["利角","TIN涂层"]'
 """
-import json, logging, os, sys, textwrap
+import argparse, json, logging, os, sys, textwrap
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -19,24 +25,26 @@ from services.llm_client import LLMClient
 from services.prompt_service import PromptService
 
 
-# ── 已知的识图结果（来自刚跑通的视觉分析）──
-PART_INFO = {
-    "name": "STRIPPER RING", "material": "S-7", "hardness": "54-56HRC",
-    "shape": "round", "coating": "无", "qty": 4,
-}
-FEATURES = [
-    {"type": "外形", "spec": "∅340×38.86mm"},
-    {"type": "精孔", "spec": "∅2.0+0.01", "roughness": 0.63, "qty": 8},
-    {"type": "精孔", "spec": "∅3.0+0.01", "roughness": 0.63, "qty": 4},
-    {"type": "精孔", "spec": "∅1.5+0.01", "roughness": 0.63, "qty": 6},
-    {"type": "刻字", "spec": ".35 high, radial depth .002-.003"},
-    {"type": "倒角", "spec": "0.2×45°"},
-    {"type": "利角", "note": "不许倒角"},
+# ── 需要生成CNC的工序（设备固定映射）──
+CNC_PROCESSES = [
+    {"name": "数控精车", "equipment": "TAKISAWA NEX-108"},
+    {"name": "镜面放电", "equipment": "SODICK AD32LS"},
 ]
-SPECIAL_REQS = [
-    "Engrave cavity number .35 high, radial depth .002-.003",
-    "SD25E-SPI标准",
-]
+
+
+def load_analysis_results(prod_no: str) -> list[dict]:
+    """从 fill_by_vision.py 的分析结果缓存加载
+    格式: data/analysis_cache_{prod_no}.json
+    """
+    cache_path = Path(__file__).parent.parent / "data" / f"analysis_cache_{prod_no}.json"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"找不到分析缓存: {cache_path}\n"
+            f"请先运行 fill_by_vision.py 再调用此脚本，"
+            f"或直接用 --part-info-json / --features-json 传入数据"
+        )
+    with open(cache_path) as f:
+        return json.load(f)  # list of {part_no, part_info, features, special_reqs}
 
 
 def gen_code(llm, prompt_service, proc, part_info, features):
@@ -51,11 +59,12 @@ def gen_code(llm, prompt_service, proc, part_info, features):
     system = prompt_service.render("cnc/system.j2")
     if not system:
         system = f"""你是森蓝精密的数控编程工程师，20年模具加工经验。
-        你精通 FANUC Series 0i/31i、三菱 M80 控制系统。
-        你生成的 G 代码全部经过安全审查，可以直接上机运行。
-        设备：{equipment}
-        材料：{part_info['material']} {part_info['hardness']}
-        """
+你精通 FANUC Series 0i/31i、三菱 M80 控制系统。
+你生成的 G 代码全部经过安全审查，可以直接上机运行。
+设备：{equipment}
+材料：{part_info['material']} {part_info['hardness']}
+
+⚠️ 铁律：只加工下方特征列表中明确列出的特征。没有的特征不要自己编。"""
         system = textwrap.dedent(system)
 
     # 渲染少样本
@@ -96,11 +105,14 @@ def gen_code(llm, prompt_service, proc, part_info, features):
         tool="CBN刀具" if "精车" in name else "铜钨合金电极",
     )
     if not user:
-        feature_str = "\n".join(f"  {f['type']}: {f['spec']}" + (f" Ra{f.get('roughness','')}" if f.get('roughness') else "") for f in features)
+        feature_str = "\n".join(
+            f"  {f['type']}: {f['spec']}" + (f" Ra{f.get('roughness','')}" if f.get('roughness') else "")
+            for f in features
+        )
         user = (
             f"请为零件 {part_info['name']} ({part_info['material']} {part_info['hardness']}) "
             f"生成 {equipment} 的 {'数控精车' if '精车' in name else '镜面放电'} G代码。\n\n"
-            f"特征：\n{feature_str}\n\n"
+            f"特征（只加工以下列出的特征）：\n{feature_str}\n\n"
             f"要求：安全高度≥50mm，G43/Hxx补偿，M08冷却，M30结尾。\n"
             f"参考格式：\n{few_shot}"
         )
@@ -121,7 +133,7 @@ def gen_code(llm, prompt_service, proc, part_info, features):
 def self_review(llm, prompt_service, code, process_name):
     """自审Agent"""
     log.info(f"  ── [自审Agent] {process_name} ──")
-    
+
     review_prompt = prompt_service.render("cnc/self_review.j2", generated_code=code)
     if not review_prompt:
         review_prompt = f"""请审查以下CNC代码，以JSON格式返回结果。
@@ -131,6 +143,7 @@ def self_review(llm, prompt_service, code, process_name):
 ```
 
 审查清单：
+0. **不虚构特征** — 代码中的加工特征都来自真实零件，没有自己发明的特征
 1. 安全高度 — G00前有Z安全高度？
 2. 主轴转速 — S值合理？
 3. 程序结尾 — 有M30或M02？
@@ -140,10 +153,8 @@ def self_review(llm, prompt_service, code, process_name):
 注意：你的回答必须包含'json'这个词，因为输出格式要求json_object。
 
 输出JSON格式：
-{{"summary": {{"passed": 5, "failed": 0, "total": 5}}, "overall": "pass", "revision_advice": "..."}}
-"""
+{{"summary": {{"passed": 5, "failed": 0, "total": 5}}, "overall": "pass", "revision_advice": "..."}}"""
     else:
-        # 确保包含"json"关键词（因为response_format要求）
         review_prompt += "\n\n注意：请输出纯JSON格式，因为输出格式要求为json。"
 
     try:
@@ -164,7 +175,7 @@ def self_review(llm, prompt_service, code, process_name):
 def cross_review(llm, prompt_service, code_segments, vision_json):
     """交叉审查Agent"""
     log.info(f"\n  ── [交叉审查Agent] ──")
-    
+
     review_prompt = prompt_service.render("review/cross_check.j2",
         vision_output=vision_json,
         cnc_output={"code_segments": code_segments},
@@ -204,33 +215,55 @@ CNC代码：
         return {"cnc_review": {"passed": True, "safety_score": 80, "overall_score": 75}, "final_verdict": "approve"}
 
 
-def run():
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "sk-44dc747ec9b044ea886cdd468ad3a851")
+def run(
+    prod_no: str = "",
+    part_info: dict = None,
+    features: list = None,
+    special_reqs: list = None,
+    part_no: str = "",
+):
+    """运行CNC编程流水线
+
+    Args:
+        prod_no: 生产单号
+        part_info: 零件信息（名称、材料、硬度等）
+        features: 特征列表
+        special_reqs: 特殊要求
+        part_no: 零件号
+    """
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        # 尝试从.env读取
+        pass
     llm = LLMClient(api_key=api_key)
     prompt = PromptService()
 
     log.info("=== CNC编程Agent流水线 ===")
-    log.info(f"零件: {PART_INFO['name']} ({PART_INFO['material']})")
+    log.info(f"生产单: {prod_no or 'N/A'}")
+    log.info(f"零件: {part_info.get('name', '(未命名)') if part_info else '(无数据)'}")
+    log.info(f"材料: {part_info.get('material', '?')} {part_info.get('hardness', '')}" if part_info else "?")
+    log.info(f"特征数: {len(features) if features else 0}")
 
-    # ── 需要生成CNC的工序 ──
-    cnc_processes = [
-        {"name": "数控精车", "equipment": "TAKISAWA NEX-108"},
-        {"name": "镜面放电", "equipment": "SODICK AD32LS"},
-    ]
+    warning = ""
+    if not features or len(features) == 0:
+        warning = "⚠️ 警告：没有特征数据，生成的CNC代码无参考依据！"
+        log.warning(warning)
 
     code_segments = []
 
     # ── 1. 逐个工序编程 ──
-    for proc in cnc_processes:
-        code = gen_code(llm, prompt, proc, PART_INFO, FEATURES)
-        
+    for proc in CNC_PROCESSES:
+        code = gen_code(llm, prompt, proc, part_info or {}, features or [])
+
         # 修正：如果代码太短或不是G代码，说明LLM没理解，用fallback
         if len(code) < 50 or not any(cmd in code for cmd in ["G0", "M0", "C0"]):
             log.warning(f"  LLM输出异常，使用内置fallback")
             if "精车" in proc["name"]:
+                pn = part_info.get("name", "未知零件") if part_info else "未知零件"
                 code = (
-                    f"; TAKISAWA NEX-108 — {PART_INFO['name']} CNC精车\n"
-                    f"; Material: {PART_INFO['material']} / {PART_INFO['hardness']}\n"
+                    f"; TAKISAWA NEX-108 — {pn} CNC精车\n"
+                    f"; Material: {part_info.get('material','?')} / {part_info.get('hardness','?')}\n"
+                    if part_info else ""
                     f";\n"
                     f"G90 G21 G40 G80\n"
                     f"G28 U0 W0\n"
@@ -239,20 +272,16 @@ def run():
                     f"T0101\n"
                     f"G96 S180 M03             ; 线速度 180m/min\n"
                     f"G00 X342.0 Z2.0 M08      ; 安全接近\n"
-                    f"G01 Z-38.86 F0.08        ; 外圆精车 ∅340\n"
+                    f"G01 Z-38.86 F0.08        ; 外圆精车\n"
                     f"G00 X345.0 Z10.0\n"
-                    f";\n"
-                    f"; --- 倒角 0.2×45° ---\n"
-                    f"G00 X339.6 Z0.0\n"
-                    f"G01 X340.0 Z-0.2 F0.05  ; 倒角\n"
-                    f"G00 Z10.0\n"
                     f";\n"
                     f"G28 U0 W0\n"
                     f"M30"
                 )
             else:
+                pn = part_info.get("name", "未知零件") if part_info else "未知零件"
                 code = (
-                    f"; SODICK AD32LS — {PART_INFO['name']} 镜面放电\n"
+                    f"; SODICK AD32LS — {pn} 镜面放电\n"
                     f"; Electrode: Cu-W\n"
                     f"; Surface: Ra0.63 -> Ra0.2\n"
                     f";\n"
@@ -260,16 +289,10 @@ def run():
                     f"G90\n"
                     f"M80 (POWER ON)\n"
                     f";\n"
-                    f"; --- 粗加工: ∅2.0 精孔 ×8 ---\n"
                     f"C001 (IP=5A, PW=50us, VP=90V)\n"
                     f"G01 X100.0 Y100.0\n"
                     f"G01 Z-5.0 H001\n"
                     f";\n"
-                    f"; --- ∅3.0 精孔 ×4 ---\n"
-                    f"G01 X150.0 Y100.0\n"
-                    f"G01 Z-5.0 H001\n"
-                    f";\n"
-                    f"; --- 精加工至镜面 ---\n"
                     f"C002 (IP=2A, PW=20us, VP=70V)\n"
                     f"G01 Z-5.1 H001\n"
                     f"C003 (IP=0.5A, PW=5us, VP=50V)\n"
@@ -278,29 +301,31 @@ def run():
                     f";\n"
                     f"M02"
                 )
-        
+
         code_segments.append({
             "process": proc["name"],
             "equipment": proc["equipment"],
             "code": code,
         })
-        
+
         # ── 2. 自审 ──
         review = self_review(llm, prompt, code, proc["name"])
         code_segments[-1]["self_review"] = review
 
     # ── 3. 交叉审查 ──
     vision_json = json.dumps({
-        "part_info": PART_INFO, "features": FEATURES,
-        "special_requirements": SPECIAL_REQS,
+        "part_info": part_info or {},
+        "features": features or [],
+        "special_requirements": special_reqs or [],
     }, ensure_ascii=False, indent=2)
     cross = cross_review(llm, prompt, code_segments, vision_json)
 
     # ── 4. 合成 + 输出 ──
     result = {
-        "prod_no": "W20126051401",
-        "part_info": PART_INFO,
-        "features": FEATURES,
+        "prod_no": prod_no,
+        "part_no": part_no,
+        "part_info": part_info or {},
+        "features": features or [],
         "cnc_code": {s["process"]: s["code"] for s in code_segments},
         "quality": {
             "self_reviews": [s["self_review"] for s in code_segments],
@@ -308,7 +333,9 @@ def run():
         },
     }
 
-    out_path = "data/cnc_pipeline_result.json"
+    out_dir = Path(__file__).parent.parent / "data"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / "cnc_pipeline_result.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     log.info(f"已保存: {out_path}")
@@ -327,14 +354,56 @@ def run():
     print(f"{'─'*70}")
     print(edm_code)
     print(f"\n📊 质量报告:")
-    print(f"  🔍 识图: {PART_INFO['name']} ({PART_INFO['material']} {PART_INFO['hardness']})")
+    print(f"  🔍 零件: {part_info.get('name','?') if part_info else '?'} ({part_info.get('material','?') if part_info else '?'})")
     print(f"  💻 编程: {len(code_segments)}段代码")
     print(f"  📝 各工序自审: {[s['self_review'].get('overall','?') for s in code_segments]}")
     print(f"  🔎 交叉审查: {cross.get('final_verdict','?')}")
+    if warning:
+        print(f"  ⚠️  {warning}")
     print(f"{'='*70}\n")
 
     return result
 
 
+def main():
+    parser = argparse.ArgumentParser(description="CNC编程Agent流水线")
+    parser.add_argument("--prod-no", default="", help="生产单号")
+    parser.add_argument("--part-no", default="", help="零件号")
+    parser.add_argument("--part-info-json", default=None, help="零件信息JSON字符串")
+    parser.add_argument("--features-json", default=None, help="特征列表JSON字符串")
+    parser.add_argument("--special-reqs-json", default=None, help="特殊要求JSON字符串")
+    args = parser.parse_args()
+
+    # 优先从JSON参数加载
+    if args.part_info_json and args.features_json:
+        part_info = json.loads(args.part_info_json)
+        features = json.loads(args.features_json)
+        special_reqs = json.loads(args.special_reqs_json) if args.special_reqs_json else []
+        run(
+            prod_no=args.prod_no,
+            part_info=part_info,
+            features=features,
+            special_reqs=special_reqs,
+            part_no=args.part_no,
+        )
+    elif args.prod_no:
+        # 从分析缓存加载
+        results = load_analysis_results(args.prod_no)
+        for r in results:
+            log.info(f"\n{'='*60}")
+            log.info(f"处理零件: {r.get('part_no', '?')}")
+            run(
+                prod_no=args.prod_no,
+                part_no=r.get("part_no", ""),
+                part_info=r.get("part_info", {}),
+                features=r.get("features", []),
+                special_reqs=r.get("special_reqs", []),
+            )
+    else:
+        parser.print_help()
+        print("\n错误：请指定 --prod-no（从缓存加载）或 --part-info-json + --features-json（直接传参）")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    run()
+    main()

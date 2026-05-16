@@ -354,6 +354,7 @@ POST https://open.feishu.cn/open-apis/im/v1/messages
 - ❌ 禁止操作非目标生产单
 - ❌ 禁止 git push 未经允许
 - ❌ 禁止零件号硬编码（必须从文件名动态提取）
+- ❌ **禁止 CNC 代码无参考瞎编** — CNC 编程必须基于图纸视觉分析得出的特征数据+实际设备参数。LLM 不能自己发明特征来凑 G 代码。`run_cnc_pipeline.py` 必须接收真实的 `part_info`、`features`、`special_reqs`，禁止硬编码假数据
 
 ## 踩坑速查
 

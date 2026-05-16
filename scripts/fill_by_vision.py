@@ -262,7 +262,36 @@ def batch_analyze(drawings: dict, gen_cnc: bool) -> dict:
                      f"共{len(process_plan)}道")
             plans[prod_no][part_no] = process_plan
 
+            # 保存分析缓存（供 CNC pipeline 使用）
+            _save_analysis_cache(prod_no, part_no, part_info, features, special_reqs)
+
     return plans
+
+
+def _save_analysis_cache(prod_no, part_no, part_info, features, special_reqs):
+    """保存视觉分析结果到缓存文件，供 run_cnc_pipeline.py 读取"""
+    import json as _json
+    cache_dir = Path(__file__).parent.parent / "data"
+    cache_dir.mkdir(exist_ok=True)
+    cache_path = cache_dir / f"analysis_cache_{prod_no}.json"
+    entry = {
+        "part_no": part_no,
+        "part_info": part_info,
+        "features": features,
+        "special_reqs": special_reqs,
+    }
+    if cache_path.exists():
+        with open(cache_path) as f:
+            existing = _json.load(f)
+    else:
+        existing = []
+    # 替换已有零件或追加
+    existing = [e for e in existing if e.get("part_no") != part_no]
+    existing.append(entry)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        _json.dump(existing, f, ensure_ascii=False, indent=2)
+    log.info(f"  ✓ 分析缓存已保存: {cache_path.name}")
+
 
 
 # ─── 单零件对话框填充 ─────────────────────────────

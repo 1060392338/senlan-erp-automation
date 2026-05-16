@@ -7,16 +7,15 @@
 ```bash
 cd ~/.hermes/senlan-automation
 
-# 第一步：扫描图纸目录，自动发现所有生产单 → 视觉分析 → 填ERP → 保存分析缓存
+# 全流程：扫图纸→视觉分析→填ERP→自动调CNC编程→保存结果
+# 一条命令搞定（含CNC代码生成+自审+交叉审查）
 python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --account 472
 
-# 第二步：读取上一步保存的分析缓存（真实数据）→ 生成CNC G代码 → 自审 → 交叉审查
-python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
-
-# 第三步：AI读取 data/cnc_pipeline_result.json，发送完整G代码到飞书
-
-# 快捷方式：指定单号+零件子集
+# 指定单号+零件子集
 python3 scripts/fill_by_vision.py --drawings-dir /Volumes/m2/erp/ --prod-no C03026051501 --parts 001,002 --account 472
+
+# 单独跑 CNC 编程（已有分析缓存时）
+python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
 ```
 
 **无需手动 export 环境变量** — `.env` 由脚本自动加载。

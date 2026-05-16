@@ -89,9 +89,9 @@ related_skills:
 
 阅读完成后输出**执行计划摘要**给用户确认。
 
-### Step 4 — 执行流程
+### Step 4 — 执行流程（一条命令全自动）
 
-① **运行 `fill_by_vision.py`** — 视觉分析→缓存→推理→填ERP：
+运行 `fill_by_vision.py` 即完成全部流程（视觉分析→缓存→推理→填ERP→自动调CNC编程→自审→交叉审查）：
 ```bash
 cd ~/.hermes/senlan-automation
 python3 scripts/fill_by_vision.py \
@@ -99,27 +99,18 @@ python3 scripts/fill_by_vision.py \
     --prod-no C03026051501 \
     --account 472
 ```
-`fill_by_vision.py` 自动完成：
+自动完成：
 - 扫描图纸目录 → 文件名提取 `{prod_no}-{part_no}`
 - 批量视觉分析（阿里百炼 qwen3.6-plus）
 - 特征驱动推理 → 确定工序顺序+参数
 - 保存分析缓存 `data/analysis_cache_{prod_no}.json`
 - Playwright 登录ERP → 搜索→填充→保存（每个零件独立浏览器）
+- **自动调度 CNC 编程流水线**（读取分析缓存 → 编程Agent → 自审 → 交叉审查 → 保存 `data/cnc_pipeline_result.json`）
 
-② **运行 `run_cnc_pipeline.py`** — 读取真实分析数据生成G代码（必须承接上一步）：
-```bash
-# 从刚刚保存的分析缓存读取真实数据
-python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
-```
-`run_cnc_pipeline.py` 自动：
-- 读取 `data/analysis_cache_{prod_no}.json`（真实零件信息+特征+特殊要求）
-- 对「数控精车」（TAKISAWA NEX-108）和「镜面放电」（SODICK AD32LS）两道工序
-- 编程Agent → 生成G代码 → 自审Agent → 交叉审查Agent
-- 保存结果到 `data/cnc_pipeline_result.json`
-
-③ **CNC 代码返回飞书**（见 Step 5）
-
-⚠️ **重要**：两步必须顺序执行，`fill_by_vision.py` 必须先运行产生分析缓存，`run_cnc_pipeline.py` 才能读取真实数据。禁止用硬编码假数据跑 CNC 管道。
+> 如需单独重跑 CNC 编程（如修改了分析结果后）：
+> ```bash
+> python3 scripts/run_cnc_pipeline.py --prod-no C03026051501
+> ```
 
 ### Step 5 — CNC 代码全量返回飞书（必须）
 

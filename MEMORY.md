@@ -7,8 +7,8 @@
 
 ## 当前状态（2026-05-16）
 
-**版本**: V5.5 — 多零件生产单元全支持 ✅
-**skill版本**: 5.5.0
+**版本**: V5.6 — 多零件+CNC全自动流水线 ✅
+**skill版本**: 5.6.0
 **账号**: 472（默认，可通过 `--account` 参数指定）
 **密码**: 123456
 **ERP地址**: http://112.74.35.30
@@ -39,6 +39,19 @@
 |----|---------|
 | VXE `vm.insert()`/`vm.remove()`不生效 | 用 `vm.getData()` 返回的对象直接改字段 |
 | 搜索不到订单 | 遍历未发送→BOM清单→已发送三个标签（新单优先在未发送） |
+| 多零件在不同标签页 | 每个零件独立遍历全部三个标签（001在未发送，002可能在已发送） |
+| 弹窗el-select下拉为空 | 选项在表头 `title` 属性里，不在DOM |
+| 弹窗选错dialog | 遍历所有`.el-dialog`检查`title`文本，不取第一个 |
+| 视觉API返回400 | 本地文件必须base64编码为`data:image/...`，不能传路径 |
+| CNC审查过严 | 已降标 5 项宽松检查 |
+| `chat_json()`返回400 | 消息（system/user）必须含"json"字符串 |
+| 保存后弹窗残留遮罩 | **每个零件独立开浏览器**，保存后关闭整个浏览器再开新的 |
+| `_generate_remark()` roughness类型错误 | `sorted(str(r) for r in roughness_set)` 而非 `sorted(roughness_set)` |
+| `qty` 为字符串 | 加类型安全转换：`try: qty = int(qty_raw) except: qty = 1` |
+| 飞书Secret硬编码 | V5.6 已移入 `.env`，从 `os.environ` 读取 |
+| format_cnc_for_remark()死代码 | V5.6 已删除，CNC由 `run_cnc_pipeline.py` 承接 |
+| --gen-cnc参数 | V5.6 已删除，`fill_by_vision.py` 填完ERP自动调 CNC pipeline |
+| fallback含假坐标X342.0 | V5.6 已改为 `(TBD)` 标记 |
 | 多零件在不同标签页 | 每个零件独立遍历全部三个标签（001在未发送，002可能在已发送） |
 | 弹窗el-select下拉为空 | 选项在表头 `title` 属性里，不在DOM |
 | 弹窗选错dialog | 遍历所有`.el-dialog`检查`title`文本，不取第一个 |

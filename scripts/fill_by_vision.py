@@ -168,56 +168,14 @@ def click_process_mgmt(page):
 
 # ─── CNC 格式 ─────────────────────────────────────
 
-def format_cnc_for_remark(process_name: str, part_info: dict, features: list) -> str:
-    if process_name == "数控精车":
-        dim = "100"
-        depth = "50"
-        for f in (features or []):
-            if f.get("type") in ("外形", "轮廓"):
-                parts = (f.get("spec", "") or "").replace("mm", "").split("x")
-                if parts:
-                    dim = parts[0].strip()
-                if len(parts) > 1:
-                    depth = parts[1].strip()
-                break
-        hardness = part_info.get("hardness", "58-63HRC")
-        material = part_info.get("material", "K490")
-        return (
-            f"[CNC编程 - TAKISAWA NEX-108]\n"
-            f"材料: {material} {hardness}\n"
-            f"外形: {dim}x{depth}mm\n"
-            f"转速: S1800 rpm | 进给: F0.08 mm/rev\n"
-            f"切深: ap 0.2mm | 余量: 单边0.5mm\n"
-            f"刀具: CBN刀具 (硬度>55HRC)\n"
-            f"冷却: 乳化液 8bar\n"
-            f"CODE:G90 G21;G28 U0 W0;T0101;M03 S1800;"
-            f"G00 X{dim} Z2.0 M08;G01 Z-{depth} F0.08;"
-            f"G00 X{dim} Z2.0;G28 U0 W0;M30"
-        )
-    elif process_name == "镜面放电":
-        return (
-            f"[CNC编程 - SODICK AD32LS]\n"
-            f"加工: 镜面放电\n"
-            f"表面要求: Ra0.2\n"
-            f"电极: 铜/石墨\n"
-            f"放电电流: IP 3-5A\n"
-            f"脉宽: ON 50us / OFF 25us\n"
-            f"间隙电压: GV 60V\n"
-            f"电极损耗: <0.5%\n"
-            f"CODE:C000;G90;M80;"
-            f"G01 Z-5.0 H001;M88;M02"
-        )
-    return ""
-
 
 # ─── 视觉+推理（批量）────────────────────────────
 
-def batch_analyze(drawings: dict, gen_cnc: bool) -> dict:
+def batch_analyze(drawings: dict) -> dict:
     """预批量做全部视觉分析和工艺推理
 
     Args:
         drawings: { prod_no: {part_no: pdf_path} }
-        gen_cnc: 是否生成CNC代码嵌入工艺要求
 
     Returns:
         { prod_no: {part_no: process_plan} }
@@ -251,12 +209,6 @@ def batch_analyze(drawings: dict, gen_cnc: bool) -> dict:
 
             full_plan = reason_process(part_info, features, special_reqs)
             process_plan = map_to_erp_processes(full_plan)
-
-            if gen_cnc:
-                for p in process_plan:
-                    cnc_text = format_cnc_for_remark(p["name"], part_info, features)
-                    if cnc_text:
-                        p["remark"] += "\n\n" + cnc_text
 
             log.info(f"  工序: {[p['name'] for p in process_plan]}, "
                      f"共{len(process_plan)}道")
@@ -391,7 +343,7 @@ def fill_one_part(page, part_no_label: str, process_plan: list,
 # ─── 处理一个生产单的所有零件 ─────────────────────
 
 def process_prod_no(page, prod_no: str, plans: dict,
-                    gen_cnc: bool, account: str):
+                    account: str):
     """在ERP中处理一个生产单号下的所有零件
 
     以图纸文件名为源：(prod_no, part_no) 来自文件名，
@@ -537,7 +489,7 @@ def process_prod_no(page, prod_no: str, plans: dict,
 
 def run(drawings_dir: str = None, drawing_path: str = None,
         prod_no: str = None, parts: str = None,
-        gen_cnc: bool = False, account: str = "472"):
+        account: str = "472"):
     """主流程入口
 
     两种模式：
@@ -553,7 +505,6 @@ def run(drawings_dir: str = None, drawing_path: str = None,
     log.info(f"{'='*60}")
     log.info(f"森蓝ERP工艺全流程")
     log.info(f"账号: {account}")
-    log.info(f"生成CNC代码: {gen_cnc}")
 
     # ── Step 0: 图纸扫描 ──
     if drawings_dir:
@@ -589,7 +540,7 @@ def run(drawings_dir: str = None, drawing_path: str = None,
     # ── Step 1: 批量视觉+推理 ──
     log.info(f"\n{'='*60}")
     log.info("批量视觉分析 + 工艺推理...")
-    plans = batch_analyze(target, gen_cnc)
+    plans = batch_analyze(target)
     log.info(f"\n推理完成: {sum(len(v) for v in plans.values())} 套工艺方案")
 
     # ── Step 2-3: 每个零件独立开浏览器处理 ──
@@ -728,6 +679,21 @@ def run(drawings_dir: str = None, drawing_path: str = None,
     print(f"✅ 全流程完成! 成功 {success_count}/{total_parts}")
     print(f"{'='*50}")
 
+    # ── CNC 编程（自动调流水线，读取分析缓存）──
+    if success_count > 0 and target:
+        try:
+            from scripts.run_cnc_pipeline import run as run_cnc
+            for pn in sorted(target.keys()):
+                log.info(f"调度 CNC 编程: {pn}")
+                try:
+                    run_cnc(prod_no=pn)
+                except Exception as cnc_e:
+                    log.warning(f"  CNC编程失败（{pn}）: {cnc_e}")
+        except ImportError:
+            log.warning("run_cnc_pipeline 未导入，跳过 CNC 编程")
+        except Exception as e:
+            log.warning(f"CNC 编程调度失败: {e}")
+
     # ── 发送飞书通知 ──
     try:
         _send_feishu_notification(success_count, total_parts, fail_count, target)
@@ -737,22 +703,22 @@ def run(drawings_dir: str = None, drawing_path: str = None,
 
 # ─── 飞书通知 ─────────────────────────────────────
 
-FEISHU_APP_ID = "cli_a960a49baef99bdd"
-FEISHU_APP_SECRET = "Pl4hmtpxftzqLUYVjdkMChViSfqNdDlt"
-FEISHU_USER_OPEN_ID = "ou_1122210fb81365e5a8bb203286e96e65"
-
-
 def _send_feishu_notification(success: int, total: int, failed: int, target: dict):
-    """发送全流程完成通知到飞书用户私聊"""
+    """发送全流程完成通知到飞书用户私聊
+    凭证从环境变量读取（.env）：FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_OPEN_ID
+    """
     import urllib.request
     import json as _json
 
+    app_id = os.environ.get("FEISHU_APP_ID", "")
+    app_secret = os.environ.get("FEISHU_APP_SECRET", "")
+    user_open_id = os.environ.get("FEISHU_OPEN_ID", "")
+    if not app_id or not app_secret:
+        log.warning("飞书凭证未配置（FEISHU_APP_ID/FEISHU_APP_SECRET）")
+        return
     # 1. 获取 tenant_access_token
     token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-    token_data = _json.dumps({
-        "app_id": FEISHU_APP_ID,
-        "app_secret": FEISHU_APP_SECRET,
-    }).encode()
+    token_data = _json.dumps({"app_id": app_id, "app_secret": app_secret}).encode()
     req = urllib.request.Request(token_url, data=token_data,
                                  headers={"Content-Type": "application/json"})
     resp = _json.loads(urllib.request.urlopen(req, timeout=10).read())
@@ -783,7 +749,7 @@ def _send_feishu_notification(success: int, total: int, failed: int, target: dic
     # 3. 发送消息到用户私聊
     msg_url = "https://open.feishu.cn/open-apis/im/v1/messages"
     msg_data = _json.dumps({
-        "receive_id": FEISHU_USER_OPEN_ID,
+        "receive_id": user_open_id,
         "msg_type": "text",
         "content": msg_content,
     }).encode()
@@ -807,7 +773,6 @@ def main():
     parser.add_argument("--drawing", default=None, help="单张图纸路径（向后兼容）")
     parser.add_argument("--prod-no", default=None, help="生产单号（配合 --drawings-dir 过滤，或 --drawing 指定）")
     parser.add_argument("--parts", default=None, help="零件号过滤（逗号分隔，配合 --drawings-dir）")
-    parser.add_argument("--gen-cnc", action="store_true", help="生成CNC代码嵌入工艺要求")
     parser.add_argument("--account", default="472", help="ERP账号")
     args = parser.parse_args()
 
@@ -816,7 +781,6 @@ def main():
         drawing_path=args.drawing,
         prod_no=args.prod_no,
         parts=args.parts,
-        gen_cnc=args.gen_cnc,
         account=args.account,
     )
 

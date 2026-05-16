@@ -451,3 +451,33 @@ send_message(target=target, message=message)
 | _generate_remark() 报 TypeError | roughness_set/rough_vals 加 `str(r)` |
 | CNC审查过严 | 已降标 5 项宽松检查 |
 | 搜索不到订单 | 遍历未发送→BOM清单→已发送 |
+
+## 代码审查 — V5.6 已知缺陷与改进计划
+
+> 以下问题来源于2026-05-16全流程代码审查。按优先级标注。
+
+### 🔴 必须修复（合入前解决）
+
+1. **飞书 Secret 硬编码** — `scripts/fill_by_vision.py` L740-742 明文写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。移入 `.env`。
+2. **飞书通知 400 错误** — `_send_feishu_notification()` 每次调用返回 HTTP 400。token/user_id 过期或 content JSON 转义异常。改用 `send_message` 工具或检查飞书凭证。
+3. **两步脚本人工衔接** — 用户跑完 `fill_by_vision.py` 还要手动跑 `run_cnc_pipeline.py`。`fill_by_vision.py` 成功填完 ERP 后应自动调用 CNC 管道。
+4. **死代码 `format_cnc_for_remark()`** — 已被 `run_cnc_pipeline.py` 取代，删除 `--gen-cnc` 参数和该函数。
+
+### 🟡 建议修改（本次或下次迭代）
+
+1. **`time.sleep()` 替换** — 39 处硬延时（1-6s），改为 Playwright 原生 `wait_for_selector` / `wait_for_function`，每零件省 5-10 秒。
+2. **`run_cnc_pipeline.py` fallback 假坐标** — `G00 X342.0 Z2.0` 是前一个测试零件的尺寸，不是当前零件。fallback 应只出空壳 + `(TBD: 尺寸缺失)`。
+3. **`process_reasoning.py` 拆分** — 914 行，拆为 `reasoning_rules.py`（特征→工序映射）、`reasoning_sorter.py`（排序）、`reasoning_time.py`（工时）。
+4. **视觉分析串行瓶颈** — N 张图 = N×3 分钟。用 `ThreadPoolExecutor(max_workers=2)` 并行 2-3 张。
+5. **每零件重开浏览器** — 每零件重登录耗时 ~15 秒。外部循环保持 context，只在弹窗残留时重建。
+6. **`fill_by_vision.py` 职责拆分** — 825 行单文件。拆为 CLI 入口 + vision_service + erp_service + feishu_service。
+7. **fallback 字符串拼接 bug** — `run_cnc_pipeline.py:run()` L262-267，`if part_info else ""` 后的 `f";\\n"` 不受条件控制。
+8. **MEMORY.md 版本号** — 标 V5.5 实为 V5.6，更新。
+
+### 🔵 仅供参考
+
+1. `_save_analysis_cache()` 内 `import json as _json` — 模块顶部已有 `import json`。
+2. `FEATURE_PROCESS_MAP` 中 "利角" 映射空列表 — 加注释说明"不生成独立工序"。
+3. CNC_PROCESSES 设备型号硬编码 — 未来应从图纸标注动态获取。
+4. 无单元测试 — 核心函数 `reason_process()` 应加 unittest。
+5. `try: int(qty) except: qty = 1` 太宽泛 — 指定 `except (ValueError, TypeError)`。
